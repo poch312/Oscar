@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+import requests as req_lib
 from flask import Flask, request, jsonify, send_file
 
 load_dotenv()
@@ -317,6 +318,8 @@ def chat():
         agent = OscarAgent(sid)
         text, saved_files = agent.chat(message)
         return jsonify({"text": text, "saved_files": saved_files})
+    except req_lib.exceptions.Timeout:
+        return jsonify({"error": "La red es lenta. Espera unos segundos y vuelve a intentarlo."}), 504
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

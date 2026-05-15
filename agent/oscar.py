@@ -76,9 +76,9 @@ class OscarAgent:
             "generationConfig": {"maxOutputTokens": 8192},
         }
         for attempt in range(4):
-            resp = requests.post(url, json=payload, timeout=120)
+            resp = requests.post(url, json=payload, timeout=60)
             if resp.status_code == 429:
-                wait = 15 * (attempt + 1)
+                wait = 10 * (attempt + 1)
                 time.sleep(wait)
                 continue
             resp.raise_for_status()
