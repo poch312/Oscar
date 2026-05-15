@@ -29,66 +29,77 @@ HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OSCAR – Agente Docente</title>
+<title>OSCAR</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0e1117;color:#fafafa;height:100vh;display:flex;overflow:hidden}
-#sidebar{width:250px;min-width:250px;background:#1a1f2e;border-right:1px solid #2d3748;display:flex;flex-direction:column;padding:14px;gap:6px;overflow-y:auto}
+#overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10}
+#overlay.open{display:block}
+#sidebar{width:260px;min-width:260px;background:#1a1f2e;border-right:1px solid #2d3748;display:flex;flex-direction:column;padding:14px;gap:6px;overflow-y:auto;z-index:20;transition:transform .25s ease}
 #sidebar h1{font-size:18px;color:#667eea;margin-bottom:2px}
-#sidebar .sub{font-size:10px;color:#718096;margin-bottom:10px}
-.btn{padding:8px 12px;border:none;border-radius:8px;cursor:pointer;font-size:13px;transition:background .2s}
-.btn-new{background:#667eea;color:#fff;width:100%;text-align:left}
+#sidebar .sub{font-size:10px;color:#718096;margin-bottom:10px;line-height:1.4}
+.btn-new{background:#667eea;color:#fff;width:100%;text-align:left;padding:9px 12px;border:none;border-radius:8px;cursor:pointer;font-size:13px}
 .btn-new:hover{background:#5a67d8}
 .divider{border:none;border-top:1px solid #2d3748;margin:6px 0}
-.label{font-size:10px;color:#718096;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
-.sess{display:flex;align-items:center;gap:4px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:12px;color:#a0aec0}
+.lbl{font-size:10px;color:#718096;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
+.sess{display:flex;align-items:center;gap:4px;padding:7px 8px;border-radius:6px;cursor:pointer;font-size:12px;color:#a0aec0}
 .sess:hover,.sess.active{background:#2d3748;color:#fafafa}
-.sess span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sess .del{display:none;color:#fc8181;font-size:13px;flex-shrink:0}
-.sess:hover .del{display:block}
+.sess .sname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sess .del{color:#fc8181;font-size:13px;flex-shrink:0;opacity:.6}
 .doc-item{font-size:11px;color:#718096;padding:3px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#main{flex:1;display:flex;flex-direction:column;overflow:hidden}
-#header{padding:10px 18px;background:#1a1f2e;border-bottom:1px solid #2d3748;flex-shrink:0}
-#header h2{font-size:15px}
-#header p{font-size:10px;color:#718096}
-#messages{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
-.msg{max-width:82%;padding:10px 14px;border-radius:12px;font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+#header{padding:10px 14px;background:#1a1f2e;border-bottom:1px solid #2d3748;flex-shrink:0;display:flex;align-items:center;gap:10px}
+#menu-btn{background:none;border:none;color:#a0aec0;font-size:22px;cursor:pointer;padding:2px 4px;display:none;flex-shrink:0;line-height:1}
+#htext{flex:1;min-width:0}
+#htext h2{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#htext p{font-size:10px;color:#718096;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#api-warn{background:#744210;color:#fefcbf;padding:8px 14px;font-size:12px;text-align:center;flex-shrink:0;display:none}
+#messages{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:85%;padding:10px 14px;border-radius:14px;font-size:14px;line-height:1.6;overflow-wrap:break-word}
 .msg.user{background:#667eea;color:#fff;align-self:flex-end;border-bottom-right-radius:3px}
 .msg.assistant{background:#1a1f2e;color:#e2e8f0;align-self:flex-start;border:1px solid #2d3748;border-bottom-left-radius:3px}
 .msg.thinking{color:#718096;font-style:italic}
-.dl-btn{display:inline-block;margin-top:8px;padding:5px 11px;background:#38a169;color:#fff;border-radius:6px;font-size:12px;text-decoration:none}
-#input-area{padding:10px 14px;background:#1a1f2e;border-top:1px solid #2d3748;display:flex;gap:8px;align-items:flex-end;flex-shrink:0}
-#user-input{flex:1;background:#2d3748;border:1px solid #4a5568;border-radius:8px;color:#fafafa;padding:9px 12px;font-size:13px;resize:none;max-height:110px;min-height:42px;font-family:inherit}
+.dl-btn{display:inline-block;margin-top:8px;padding:6px 12px;background:#38a169;color:#fff;border-radius:6px;font-size:12px;text-decoration:none}
+#input-area{padding:10px 12px;background:#1a1f2e;border-top:1px solid #2d3748;display:flex;gap:8px;align-items:flex-end;flex-shrink:0}
+#user-input{flex:1;background:#2d3748;border:1px solid #4a5568;border-radius:10px;color:#fafafa;padding:10px 13px;font-size:15px;resize:none;max-height:120px;min-height:46px;font-family:inherit;min-width:0}
 #user-input:focus{outline:none;border-color:#667eea}
-#send-btn{background:#667eea;color:#fff;border:none;border-radius:8px;padding:9px 15px;cursor:pointer;font-size:13px;height:42px;flex-shrink:0}
+#send-btn{background:#667eea;color:#fff;border:none;border-radius:10px;padding:10px 16px;cursor:pointer;font-size:15px;height:46px;flex-shrink:0}
 #send-btn:disabled{background:#4a5568;cursor:not-allowed}
-#upload-label{cursor:pointer;color:#667eea;font-size:20px;padding:8px 2px;line-height:1;flex-shrink:0}
-#api-warn{background:#744210;color:#fefcbf;padding:8px 14px;font-size:12px;text-align:center}
+#upload-label{cursor:pointer;color:#667eea;font-size:24px;padding:8px 2px;line-height:1;flex-shrink:0}
+@media(max-width:800px){
+  #sidebar{position:fixed;top:0;left:0;height:100%;transform:translateX(-100%)}
+  #sidebar.open{transform:translateX(0)}
+  #menu-btn{display:block}
+}
 </style>
 </head>
 <body>
+<div id="overlay" onclick="closeSidebar()"></div>
 <div id="sidebar">
-  <h1>📚 OSCAR</h1>
-  <p class="sub">Orientador de Saberes Curriculares,<br>Académicos y de Recursos</p>
-  <button class="btn btn-new" onclick="newSession()">＋ Nueva conversación</button>
+  <h1>&#128218; OSCAR</h1>
+  <p class="sub">Orientador de Saberes Curriculares,<br>Academicos y de Recursos</p>
+  <button class="btn-new" onclick="newSession()">+ Nueva conversacion</button>
   <hr class="divider">
-  <div class="label">Conversaciones</div>
+  <div class="lbl">Conversaciones</div>
   <div id="session-list"></div>
   <hr class="divider">
-  <div class="label">Documentos cargados</div>
+  <div class="lbl">Documentos cargados</div>
   <input type="file" id="file-input" accept=".pdf,.txt" style="display:none" onchange="uploadFile()">
   <div id="docs-list"></div>
 </div>
 <div id="main">
   <div id="header">
-    <h2>OSCAR — Agente Docente</h2>
-    <p>Especialista en educación colombiana · Matemáticas · STEM · Investigación escolar</p>
+    <button id="menu-btn" onclick="toggleSidebar()">&#9776;</button>
+    <div id="htext">
+      <h2>OSCAR &mdash; Agente Docente</h2>
+      <p>Especialista en educacion colombiana &middot; Matematicas &middot; STEM</p>
+    </div>
   </div>
-  <div id="api-warn" id="api-warn" style="display:none"></div>
+  <div id="api-warn"></div>
   <div id="messages"></div>
   <div id="input-area">
-    <label id="upload-label" for="file-input" title="Cargar PDF o TXT">📎</label>
-    <textarea id="user-input" placeholder="Escribe tu consulta aquí…" rows="1"
+    <label id="upload-label" for="file-input" title="Cargar PDF o TXT">&#128206;</label>
+    <textarea id="user-input" placeholder="Escribe tu consulta aqui..." rows="1"
       onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
     <button id="send-btn" onclick="sendMessage()">Enviar</button>
   </div>
@@ -96,28 +107,30 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 <script>
 let sid = null;
 
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('overlay').classList.toggle('open');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('overlay').classList.remove('open');
+}
+
 async function init() {
   const cfg = await fetch('/api/config').then(r=>r.json());
   if (!cfg.api_key_set) {
-    document.getElementById('api-warn').style.display='block';
-    document.getElementById('api-warn').textContent=
-      '⚠ GEMINI_API_KEY no configurada. Edita el archivo .env y reinicia el servidor.';
+    const w = document.getElementById('api-warn');
+    w.style.display='block';
+    w.textContent='Configura GEMINI_API_KEY en el archivo .env y reinicia el servidor.';
   }
   const sessions = await fetch('/api/sessions').then(r=>r.json());
-  if (sessions.length > 0) {
-    renderSessions(sessions);
-    await switchSession(sessions[0].id);
-  } else {
-    await newSession();
-  }
+  if (sessions.length > 0) { renderSessions(sessions); await switchSession(sessions[0].id); }
+  else await newSession();
 }
 
 async function newSession() {
   const res = await fetch('/api/sessions',{method:'POST'}).then(r=>r.json());
-  sid = res.id;
-  clearMsgs();
-  addWelcome();
-  await refreshSessions();
+  sid = res.id; clearMsgs(); addWelcome(); await refreshSessions();
 }
 
 async function refreshSessions() {
@@ -130,113 +143,109 @@ function renderSessions(sessions) {
   list.innerHTML='';
   for (const s of sessions) {
     const el = document.createElement('div');
-    el.className = 'sess' + (s.id===sid?' active':'');
-    el.innerHTML = `<span>${s.name}</span><span class="del" onclick="delSession('${s.id}',event)">✕</span>`;
-    el.onclick = () => switchSession(s.id);
+    el.className='sess'+(s.id===sid?' active':'');
+    el.innerHTML='<span class="sname">'+s.name+'</span>'
+      +'<span class="del" onclick="delSession(\''+s.id+'\',event)">x</span>';
+    el.onclick=()=>{switchSession(s.id);closeSidebar();}
     list.appendChild(el);
   }
 }
 
 async function switchSession(id) {
-  sid = id;
-  clearMsgs();
-  const msgs = await fetch(`/api/messages/${id}`).then(r=>r.json());
-  if (msgs.length===0) { addWelcome(); }
-  else { for (const m of msgs) addMsg(m.role, m.text); }
+  sid=id; clearMsgs();
+  const msgs=await fetch('/api/messages/'+id).then(r=>r.json());
+  if(msgs.length===0) addWelcome();
+  else for(const m of msgs) addMsg(m.role,m.text);
   await refreshSessions();
 }
 
-async function delSession(id, e) {
+async function delSession(id,e) {
   e.stopPropagation();
-  await fetch(`/api/sessions/${id}`,{method:'DELETE'});
-  if (id===sid) await newSession();
-  else await refreshSessions();
+  await fetch('/api/sessions/'+id,{method:'DELETE'});
+  if(id===sid) await newSession(); else await refreshSessions();
 }
 
-function clearMsgs() { document.getElementById('messages').innerHTML=''; }
+function clearMsgs(){document.getElementById('messages').innerHTML='';}
 
-function addWelcome() {
-  addMsg('assistant','¡Hola! Soy OSCAR. Estoy aquí para apoyarte con planeaciones, mallas curriculares, guías, rúbricas, evaluaciones, proyectos STEM y toda la documentación docente que necesites. ¿Con qué empezamos?');
+function addWelcome(){
+  addMsg('assistant','Hola! Soy OSCAR. Estoy aqui para apoyarte con planeaciones, mallas curriculares, guias, rubricas, evaluaciones, proyectos STEM y toda la documentacion docente que necesites. Con que empezamos?');
 }
 
-function addMsg(role, text, downloads=[]) {
-  const c = document.getElementById('messages');
-  const d = document.createElement('div');
-  d.className = 'msg '+role;
-  d.textContent = text;
-  for (const f of downloads) {
-    const a = document.createElement('a');
-    a.href = `/api/download/${f.filename}`;
-    a.className = 'dl-btn';
-    a.textContent = `📥 Descargar: ${f.filename}`;
-    a.download = f.filename;
+function addMsg(role,text,downloads=[]){
+  const c=document.getElementById('messages');
+  const d=document.createElement('div');
+  d.className='msg '+role;
+  d.textContent=text;
+  for(const f of downloads){
+    const a=document.createElement('a');
+    a.href='/api/download/'+f.filename;
+    a.className='dl-btn';
+    a.textContent='Descargar: '+f.filename;
+    a.download=f.filename;
     d.appendChild(document.createElement('br'));
     d.appendChild(a);
   }
   c.appendChild(d);
-  c.scrollTop = c.scrollHeight;
+  c.scrollTop=c.scrollHeight;
   return d;
 }
 
-async function sendMessage() {
-  const input = document.getElementById('user-input');
-  const text = input.value.trim();
-  if (!text || !sid) return;
+async function sendMessage(){
+  const input=document.getElementById('user-input');
+  const text=input.value.trim();
+  if(!text||!sid)return;
   input.value=''; input.style.height='auto';
-  addMsg('user', text);
-  const thinking = addMsg('assistant','OSCAR está pensando…');
+  addMsg('user',text);
+  const thinking=addMsg('assistant','OSCAR esta pensando...');
   thinking.classList.add('thinking');
   document.getElementById('send-btn').disabled=true;
-  try {
-    const res = await fetch('/api/chat',{
+  try{
+    const res=await fetch('/api/chat',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({session_id:sid, message:text})
+      body:JSON.stringify({session_id:sid,message:text})
     }).then(r=>r.json());
     thinking.remove();
-    if (res.error) addMsg('assistant','Error: '+res.error);
-    else { addMsg('assistant', res.text, res.saved_files||[]); refreshSessions(); }
-  } catch(e) {
+    if(res.error) addMsg('assistant','Error: '+res.error);
+    else{addMsg('assistant',res.text,res.saved_files||[]);refreshSessions();}
+  }catch(e){
     thinking.remove();
-    addMsg('assistant','Error de conexión. Verifica que el servidor esté corriendo.');
+    addMsg('assistant','Error de conexion. Verifica que el servidor este corriendo.');
   }
   document.getElementById('send-btn').disabled=false;
 }
 
-async function uploadFile() {
-  const input = document.getElementById('file-input');
-  const file = input.files[0];
-  if (!file) return;
-  addMsg('user',`📎 Cargando: ${file.name}…`);
-  const thinking = addMsg('assistant',`Analizando '${file.name}'…`);
+async function uploadFile(){
+  const input=document.getElementById('file-input');
+  const file=input.files[0];
+  if(!file)return;
+  addMsg('user','Cargando: '+file.name+'...');
+  const thinking=addMsg('assistant','Analizando '+file.name+'...');
   thinking.classList.add('thinking');
-  const fd = new FormData();
-  fd.append('session_id', sid);
-  fd.append('file', file);
-  try {
-    const res = await fetch('/api/upload',{method:'POST',body:fd}).then(r=>r.json());
+  const fd=new FormData();
+  fd.append('session_id',sid);
+  fd.append('file',file);
+  try{
+    const res=await fetch('/api/upload',{method:'POST',body:fd}).then(r=>r.json());
     thinking.remove();
-    if (res.error) addMsg('assistant','Error: '+res.error);
-    else {
-      addMsg('assistant', res.response);
-      const dl = document.getElementById('docs-list');
-      const el = document.createElement('div');
+    if(res.error) addMsg('assistant','Error: '+res.error);
+    else{
+      addMsg('assistant',res.response);
+      const dl=document.getElementById('docs-list');
+      const el=document.createElement('div');
       el.className='doc-item'; el.textContent='📄 '+file.name;
       dl.appendChild(el);
     }
-  } catch(e) {
-    thinking.remove();
-    addMsg('assistant','Error al cargar el documento.');
-  }
+  }catch(e){thinking.remove();addMsg('assistant','Error al cargar el documento.');}
   input.value='';
 }
 
-function handleKey(e) {
-  if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+function handleKey(e){
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}
 }
-function autoResize(el) {
+function autoResize(el){
   el.style.height='auto';
-  el.style.height=Math.min(el.scrollHeight,110)+'px';
+  el.style.height=Math.min(el.scrollHeight,120)+'px';
 }
 init();
 </script>
@@ -263,7 +272,7 @@ def list_sessions():
 @app.route("/api/sessions", methods=["POST"])
 def new_session():
     sid = memory.create_session()
-    return jsonify({"id": sid, "name": "Nueva conversación"})
+    return jsonify({"id": sid, "name": "Nueva conversacion"})
 
 
 @app.route("/api/sessions/<sid>", methods=["DELETE"])
