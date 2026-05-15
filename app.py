@@ -1,9 +1,7 @@
-import io
 import os
 from pathlib import Path
-
-import streamlit as st
 from dotenv import load_dotenv
+from flask import Flask, request, jsonify, send_file
 
 load_dotenv()
 
@@ -12,223 +10,347 @@ from agent.oscar import OscarAgent
 
 memory.init_db()
 
-st.set_page_config(
-    page_title="OSCAR – Agente Docente",
-    page_icon="📚",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+app = Flask(__name__)
 
-# ── helpers ──────────────────────────────────────────────────────────────────
 
-def _extract_pdf_text(file_bytes: bytes, filename: str) -> str:
+def _extract_text(file_bytes: bytes, filename: str) -> str:
     try:
-        import fitz  # PyMuPDF
+        import fitz
         doc = fitz.open(stream=file_bytes, filetype="pdf")
-        pages = [page.get_text() for page in doc]
+        text = "\n\n".join(p.get_text() for p in doc)
         doc.close()
-        text = "\n\n".join(p for p in pages if p.strip())
-        return text[:80_000]  # ~80 k chars to stay within context limits
+        return text[:80_000]
     except Exception as e:
-        return f"[No se pudo extraer el texto de '{filename}': {e}]"
+        return f"[No se pudo extraer texto de '{filename}': {e}]"
 
 
-def _get_or_create_session() -> str:
-    if "session_id" not in st.session_state:
-        sessions = memory.get_sessions()
-        if sessions:
-            st.session_state.session_id = sessions[0]["id"]
-        else:
-            st.session_state.session_id = memory.create_session()
-    return st.session_state.session_id
+HTML = r"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OSCAR – Agente Docente</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0e1117;color:#fafafa;height:100vh;display:flex;overflow:hidden}
+#sidebar{width:250px;min-width:250px;background:#1a1f2e;border-right:1px solid #2d3748;display:flex;flex-direction:column;padding:14px;gap:6px;overflow-y:auto}
+#sidebar h1{font-size:18px;color:#667eea;margin-bottom:2px}
+#sidebar .sub{font-size:10px;color:#718096;margin-bottom:10px}
+.btn{padding:8px 12px;border:none;border-radius:8px;cursor:pointer;font-size:13px;transition:background .2s}
+.btn-new{background:#667eea;color:#fff;width:100%;text-align:left}
+.btn-new:hover{background:#5a67d8}
+.divider{border:none;border-top:1px solid #2d3748;margin:6px 0}
+.label{font-size:10px;color:#718096;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
+.sess{display:flex;align-items:center;gap:4px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:12px;color:#a0aec0}
+.sess:hover,.sess.active{background:#2d3748;color:#fafafa}
+.sess span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sess .del{display:none;color:#fc8181;font-size:13px;flex-shrink:0}
+.sess:hover .del{display:block}
+.doc-item{font-size:11px;color:#718096;padding:3px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+#header{padding:10px 18px;background:#1a1f2e;border-bottom:1px solid #2d3748;flex-shrink:0}
+#header h2{font-size:15px}
+#header p{font-size:10px;color:#718096}
+#messages{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:82%;padding:10px 14px;border-radius:12px;font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+.msg.user{background:#667eea;color:#fff;align-self:flex-end;border-bottom-right-radius:3px}
+.msg.assistant{background:#1a1f2e;color:#e2e8f0;align-self:flex-start;border:1px solid #2d3748;border-bottom-left-radius:3px}
+.msg.thinking{color:#718096;font-style:italic}
+.dl-btn{display:inline-block;margin-top:8px;padding:5px 11px;background:#38a169;color:#fff;border-radius:6px;font-size:12px;text-decoration:none}
+#input-area{padding:10px 14px;background:#1a1f2e;border-top:1px solid #2d3748;display:flex;gap:8px;align-items:flex-end;flex-shrink:0}
+#user-input{flex:1;background:#2d3748;border:1px solid #4a5568;border-radius:8px;color:#fafafa;padding:9px 12px;font-size:13px;resize:none;max-height:110px;min-height:42px;font-family:inherit}
+#user-input:focus{outline:none;border-color:#667eea}
+#send-btn{background:#667eea;color:#fff;border:none;border-radius:8px;padding:9px 15px;cursor:pointer;font-size:13px;height:42px;flex-shrink:0}
+#send-btn:disabled{background:#4a5568;cursor:not-allowed}
+#upload-label{cursor:pointer;color:#667eea;font-size:20px;padding:8px 2px;line-height:1;flex-shrink:0}
+#api-warn{background:#744210;color:#fefcbf;padding:8px 14px;font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+<div id="sidebar">
+  <h1>📚 OSCAR</h1>
+  <p class="sub">Orientador de Saberes Curriculares,<br>Académicos y de Recursos</p>
+  <button class="btn btn-new" onclick="newSession()">＋ Nueva conversación</button>
+  <hr class="divider">
+  <div class="label">Conversaciones</div>
+  <div id="session-list"></div>
+  <hr class="divider">
+  <div class="label">Documentos cargados</div>
+  <input type="file" id="file-input" accept=".pdf,.txt" style="display:none" onchange="uploadFile()">
+  <div id="docs-list"></div>
+</div>
+<div id="main">
+  <div id="header">
+    <h2>OSCAR — Agente Docente</h2>
+    <p>Especialista en educación colombiana · Matemáticas · STEM · Investigación escolar</p>
+  </div>
+  <div id="api-warn" id="api-warn" style="display:none"></div>
+  <div id="messages"></div>
+  <div id="input-area">
+    <label id="upload-label" for="file-input" title="Cargar PDF o TXT">📎</label>
+    <textarea id="user-input" placeholder="Escribe tu consulta aquí…" rows="1"
+      onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+    <button id="send-btn" onclick="sendMessage()">Enviar</button>
+  </div>
+</div>
+<script>
+let sid = null;
+
+async function init() {
+  const cfg = await fetch('/api/config').then(r=>r.json());
+  if (!cfg.api_key_set) {
+    document.getElementById('api-warn').style.display='block';
+    document.getElementById('api-warn').textContent=
+      '⚠ GEMINI_API_KEY no configurada. Edita el archivo .env y reinicia el servidor.';
+  }
+  const sessions = await fetch('/api/sessions').then(r=>r.json());
+  if (sessions.length > 0) {
+    renderSessions(sessions);
+    await switchSession(sessions[0].id);
+  } else {
+    await newSession();
+  }
+}
+
+async function newSession() {
+  const res = await fetch('/api/sessions',{method:'POST'}).then(r=>r.json());
+  sid = res.id;
+  clearMsgs();
+  addWelcome();
+  await refreshSessions();
+}
+
+async function refreshSessions() {
+  const sessions = await fetch('/api/sessions').then(r=>r.json());
+  renderSessions(sessions);
+}
+
+function renderSessions(sessions) {
+  const list = document.getElementById('session-list');
+  list.innerHTML='';
+  for (const s of sessions) {
+    const el = document.createElement('div');
+    el.className = 'sess' + (s.id===sid?' active':'');
+    el.innerHTML = `<span>${s.name}</span><span class="del" onclick="delSession('${s.id}',event)">✕</span>`;
+    el.onclick = () => switchSession(s.id);
+    list.appendChild(el);
+  }
+}
+
+async function switchSession(id) {
+  sid = id;
+  clearMsgs();
+  const msgs = await fetch(`/api/messages/${id}`).then(r=>r.json());
+  if (msgs.length===0) { addWelcome(); }
+  else { for (const m of msgs) addMsg(m.role, m.text); }
+  await refreshSessions();
+}
+
+async function delSession(id, e) {
+  e.stopPropagation();
+  await fetch(`/api/sessions/${id}`,{method:'DELETE'});
+  if (id===sid) await newSession();
+  else await refreshSessions();
+}
+
+function clearMsgs() { document.getElementById('messages').innerHTML=''; }
+
+function addWelcome() {
+  addMsg('assistant','¡Hola! Soy OSCAR. Estoy aquí para apoyarte con planeaciones, mallas curriculares, guías, rúbricas, evaluaciones, proyectos STEM y toda la documentación docente que necesites. ¿Con qué empezamos?');
+}
+
+function addMsg(role, text, downloads=[]) {
+  const c = document.getElementById('messages');
+  const d = document.createElement('div');
+  d.className = 'msg '+role;
+  d.textContent = text;
+  for (const f of downloads) {
+    const a = document.createElement('a');
+    a.href = `/api/download/${f.filename}`;
+    a.className = 'dl-btn';
+    a.textContent = `📥 Descargar: ${f.filename}`;
+    a.download = f.filename;
+    d.appendChild(document.createElement('br'));
+    d.appendChild(a);
+  }
+  c.appendChild(d);
+  c.scrollTop = c.scrollHeight;
+  return d;
+}
+
+async function sendMessage() {
+  const input = document.getElementById('user-input');
+  const text = input.value.trim();
+  if (!text || !sid) return;
+  input.value=''; input.style.height='auto';
+  addMsg('user', text);
+  const thinking = addMsg('assistant','OSCAR está pensando…');
+  thinking.classList.add('thinking');
+  document.getElementById('send-btn').disabled=true;
+  try {
+    const res = await fetch('/api/chat',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({session_id:sid, message:text})
+    }).then(r=>r.json());
+    thinking.remove();
+    if (res.error) addMsg('assistant','Error: '+res.error);
+    else { addMsg('assistant', res.text, res.saved_files||[]); refreshSessions(); }
+  } catch(e) {
+    thinking.remove();
+    addMsg('assistant','Error de conexión. Verifica que el servidor esté corriendo.');
+  }
+  document.getElementById('send-btn').disabled=false;
+}
+
+async function uploadFile() {
+  const input = document.getElementById('file-input');
+  const file = input.files[0];
+  if (!file) return;
+  addMsg('user',`📎 Cargando: ${file.name}…`);
+  const thinking = addMsg('assistant',`Analizando '${file.name}'…`);
+  thinking.classList.add('thinking');
+  const fd = new FormData();
+  fd.append('session_id', sid);
+  fd.append('file', file);
+  try {
+    const res = await fetch('/api/upload',{method:'POST',body:fd}).then(r=>r.json());
+    thinking.remove();
+    if (res.error) addMsg('assistant','Error: '+res.error);
+    else {
+      addMsg('assistant', res.response);
+      const dl = document.getElementById('docs-list');
+      const el = document.createElement('div');
+      el.className='doc-item'; el.textContent='📄 '+file.name;
+      dl.appendChild(el);
+    }
+  } catch(e) {
+    thinking.remove();
+    addMsg('assistant','Error al cargar el documento.');
+  }
+  input.value='';
+}
+
+function handleKey(e) {
+  if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+function autoResize(el) {
+  el.style.height='auto';
+  el.style.height=Math.min(el.scrollHeight,110)+'px';
+}
+init();
+</script>
+</body>
+</html>
+"""
 
 
-def _switch_session(session_id: str) -> None:
-    st.session_state.session_id = session_id
-    st.session_state.pop("agent", None)
-    st.session_state.pop("saved_files", None)
+@app.route("/")
+def index():
+    return HTML
 
 
-def _get_agent(session_id: str) -> OscarAgent | None:
-    if "agent" not in st.session_state or st.session_state.get("_agent_session") != session_id:
-        try:
-            st.session_state.agent = OscarAgent(session_id)
-            st.session_state._agent_session = session_id
-        except ValueError as e:
-            st.error(str(e))
-            return None
-    return st.session_state.agent
+@app.route("/api/config")
+def config():
+    return jsonify({"api_key_set": bool(os.getenv("GEMINI_API_KEY"))})
 
 
-def _display_messages(messages: list[dict]) -> None:
-    for msg in messages:
-        role = msg["role"]
-        content = msg["content"]
-        if role not in ("user", "assistant"):
+@app.route("/api/sessions", methods=["GET"])
+def list_sessions():
+    return jsonify(memory.get_sessions())
+
+
+@app.route("/api/sessions", methods=["POST"])
+def new_session():
+    sid = memory.create_session()
+    return jsonify({"id": sid, "name": "Nueva conversación"})
+
+
+@app.route("/api/sessions/<sid>", methods=["DELETE"])
+def delete_session(sid):
+    memory.delete_session(sid)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/messages/<sid>")
+def get_messages(sid):
+    msgs = memory.get_messages(sid)
+    result = []
+    for m in msgs:
+        if m["role"] not in ("user", "assistant"):
             continue
+        content = m["content"]
         if isinstance(content, list):
-            text_parts = [
+            text = "\n".join(
                 b["text"] for b in content
                 if isinstance(b, dict) and b.get("type") == "text"
-            ]
-            display_text = "\n".join(text_parts).strip()
-            if not display_text:
-                continue
-        else:
-            display_text = str(content)
-            if not display_text.strip():
-                continue
-        with st.chat_message("user" if role == "user" else "assistant"):
-            st.markdown(display_text)
-
-
-# ── sidebar ───────────────────────────────────────────────────────────────────
-
-with st.sidebar:
-    st.markdown("## 📚 OSCAR")
-    st.caption("Orientador de Saberes Curriculares, Académicos y de Recursos")
-    st.divider()
-
-    if st.button("＋ Nueva conversación", use_container_width=True):
-        new_id = memory.create_session()
-        _switch_session(new_id)
-        st.rerun()
-
-    sessions = memory.get_sessions()
-    current_session_id = _get_or_create_session()
-
-    st.markdown("### Conversaciones")
-    for s in sessions:
-        cols = st.columns([5, 1])
-        label = s["name"][:35] + ("…" if len(s["name"]) > 35 else "")
-        btn_type = "primary" if s["id"] == current_session_id else "secondary"
-        if cols[0].button(label, key=f"sess_{s['id']}", use_container_width=True, type=btn_type):
-            _switch_session(s["id"])
-            st.rerun()
-        if cols[1].button("🗑", key=f"del_{s['id']}", help="Eliminar conversación"):
-            memory.delete_session(s["id"])
-            if s["id"] == current_session_id:
-                remaining = [x for x in sessions if x["id"] != s["id"]]
-                new_id = remaining[0]["id"] if remaining else memory.create_session()
-                _switch_session(new_id)
-            st.rerun()
-
-    st.divider()
-    st.markdown("### Cargar documento")
-    uploaded = st.file_uploader(
-        "PDF o TXT",
-        type=["pdf", "txt"],
-        key="file_uploader",
-        label_visibility="collapsed",
-    )
-    if uploaded and not memory.document_exists(current_session_id, uploaded.name):
-        file_bytes = uploaded.read()
-        if uploaded.name.lower().endswith(".pdf"):
-            doc_text = _extract_pdf_text(file_bytes, uploaded.name)
-        else:
-            doc_text = file_bytes.decode("utf-8", errors="replace")[:80_000]
-
-        memory.add_document(current_session_id, uploaded.name, doc_text)
-        context_msg = (
-            f"El docente ha cargado el documento **'{uploaded.name}'**.\n\n"
-            f"Contenido del documento:\n\n{doc_text}\n\n"
-            "Analiza este documento y confirma que lo has procesado."
-        )
-        agent = _get_agent(current_session_id)
-        if agent:
-            with st.spinner(f"Analizando '{uploaded.name}'…"):
-                try:
-                    agent.chat(context_msg)
-                except Exception as e:
-                    st.error(f"Error al procesar documento: {e}")
-        st.rerun()
-
-    docs = memory.get_documents(current_session_id)
-    if docs:
-        st.markdown("**Documentos cargados:**")
-        for d in docs:
-            st.caption(f"📄 {d['filename']}")
-
-    st.divider()
-    st.caption("Powered by Claude · Anthropic")
-
-
-# ── main chat ─────────────────────────────────────────────────────────────────
-
-session_id = _get_or_create_session()
-agent = _get_agent(session_id)
-
-st.markdown("# 📚 OSCAR — Agente Docente")
-st.caption("Especialista en educación colombiana · Matemáticas · STEM · Investigación escolar")
-
-if not os.getenv("GEMINI_API_KEY"):
-    st.warning(
-        "Configura tu `GEMINI_API_KEY` en el archivo `.env` para comenzar. "
-        "Copia `.env.example` a `.env` y agrega tu clave de Google AI Studio.",
-        icon="⚠️",
-    )
-    st.stop()
-
-messages = memory.get_messages(session_id)
-_display_messages(messages)
-
-if "saved_files" not in st.session_state:
-    st.session_state.saved_files = []
-
-for saved in st.session_state.saved_files:
-    filepath = Path(saved["filepath"])
-    if filepath.exists():
-        with st.expander(f"📥 Documento generado: {saved['filename']}", expanded=True):
-            content = filepath.read_text(encoding="utf-8")
-            st.download_button(
-                label="Descargar documento",
-                data=content,
-                file_name=saved["filename"],
-                mime="text/plain",
-                key=f"dl_{saved['filename']}",
             )
+        else:
+            text = str(content)
+        if text.strip():
+            result.append({"role": m["role"], "text": text})
+    return jsonify(result)
 
-if not messages:
-    st.info(
-        "Hola, soy OSCAR. Estoy aquí para ayudarte con planeaciones, mallas curriculares, "
-        "guías, rúbricas, evaluaciones, proyectos STEM y toda la documentación docente que necesites. "
-        "¿Con qué empezamos?"
+
+@app.route("/api/chat", methods=["POST"])
+def chat():
+    data = request.get_json()
+    sid = data.get("session_id")
+    message = (data.get("message") or "").strip()
+    if not sid or not message:
+        return jsonify({"error": "Faltan session_id o message"}), 400
+
+    msgs = memory.get_messages(sid)
+    if not any(m["role"] == "user" for m in msgs):
+        memory.update_session_name(sid, message[:50])
+
+    try:
+        agent = OscarAgent(sid)
+        text, saved_files = agent.chat(message)
+        return jsonify({"text": text, "saved_files": saved_files})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/upload", methods=["POST"])
+def upload():
+    sid = request.form.get("session_id")
+    file = request.files.get("file")
+    if not sid or not file:
+        return jsonify({"error": "Faltan datos"}), 400
+
+    filename = file.filename
+    if memory.document_exists(sid, filename):
+        return jsonify({"ok": True, "response": f"'{filename}' ya estaba cargado."})
+
+    file_bytes = file.read()
+    if filename.lower().endswith(".pdf"):
+        text = _extract_text(file_bytes, filename)
+    else:
+        text = file_bytes.decode("utf-8", errors="replace")[:80_000]
+
+    memory.add_document(sid, filename, text)
+    context_msg = (
+        f"El docente ha cargado el documento '{filename}'.\n\n"
+        f"Contenido:\n\n{text}\n\n"
+        "Analiza este documento y confirma que lo procesaste correctamente."
     )
+    try:
+        agent = OscarAgent(sid)
+        response_text, _ = agent.chat(context_msg)
+        return jsonify({"ok": True, "response": response_text})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-if prompt := st.chat_input("Escribe tu consulta aquí…"):
-    with st.chat_message("user"):
-        st.markdown(prompt)
 
-    if agent is None:
-        st.error("No hay un agente activo. Verifica la configuración de ANTHROPIC_API_KEY.")
-        st.stop()
+@app.route("/api/download/<filename>")
+def download(filename):
+    filepath = Path("data/generados") / filename
+    if not filepath.exists():
+        return "Archivo no encontrado", 404
+    return send_file(filepath, as_attachment=True)
 
-    # Auto-name session from first real user message
-    if len([m for m in messages if m["role"] == "user"]) == 0:
-        short_name = prompt[:50].strip()
-        memory.update_session_name(session_id, short_name)
 
-    with st.chat_message("assistant"):
-        with st.spinner("OSCAR está pensando…"):
-            try:
-                response_text, new_files = agent.chat(prompt)
-                st.session_state.saved_files = new_files
-            except Exception as e:
-                st.error(f"Error: {e}")
-                st.stop()
-
-        st.markdown(response_text)
-
-        for saved in new_files:
-            filepath = Path(saved["filepath"])
-            if filepath.exists():
-                content = filepath.read_text(encoding="utf-8")
-                st.download_button(
-                    label=f"📥 Descargar: {saved['filename']}",
-                    data=content,
-                    file_name=saved["filename"],
-                    mime="text/plain",
-                    key=f"dl_new_{saved['filename']}",
-                )
-
-    st.rerun()
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
