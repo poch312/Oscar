@@ -85,9 +85,20 @@ class OscarAgent:
             break
         data = resp.json()
 
+        if "candidates" not in data or not data["candidates"]:
+            feedback = data.get("promptFeedback", {})
+            block_reason = feedback.get("blockReason", "")
+            if block_reason:
+                raise ValueError(f"Contenido bloqueado por Gemini ({block_reason}). Intenta reformular la solicitud.")
+            raise ValueError(f"Respuesta inesperada de la API: {data}")
+
         candidate = data["candidates"][0]
-        parts = candidate["content"]["parts"]
         finish = candidate.get("finishReason", "STOP")
+
+        if finish == "SAFETY" or "content" not in candidate:
+            raise ValueError("La respuesta fue bloqueada por filtros de seguridad. Intenta reformular la solicitud.")
+
+        parts = candidate["content"]["parts"]
 
         fn_calls = [p["functionCall"] for p in parts if "functionCall" in p]
 
