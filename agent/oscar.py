@@ -1,94 +1,132 @@
 import os
 import json
-from pathlib import Path
 from dotenv import load_dotenv
-import anthropic
+import requests
 
 from .prompts import SYSTEM_PROMPT
-from .tools import TOOL_DEFINITIONS, execute_tool
+from .tools import execute_tool
 from . import memory
 
 load_dotenv()
 
-DEFAULT_MODEL = os.getenv("OSCAR_MODEL", "claude-opus-4-7")
-MAX_TOKENS = 8192
+GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+DEFAULT_MODEL = os.getenv("OSCAR_MODEL", "gemini-2.0-flash")
+
+_TOOL_SCHEMA = {
+    "function_declarations": [
+        {
+            "name": "guardar_documento",
+            "description": (
+                "Guarda un documento generado para que el docente pueda descargarlo. "
+                "Llama esta herramienta siempre que generes un documento completo listo para usar: "
+                "planeaciones, guías, talleres, rúbricas, evaluaciones, mallas curriculares, "
+                "informes, actas, proyectos, etc."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "titulo": {
+                        "type": "string",
+                        "description": "Título descriptivo del documento.",
+                    },
+                    "contenido": {
+                        "type": "string",
+                        "description": "Contenido completo del documento en formato Markdown.",
+                    },
+                    "tipo_documento": {
+                        "type": "string",
+                        "enum": [
+                            "planeacion", "guia", "taller", "rubrica", "evaluacion",
+                            "malla_curricular", "informe", "acta", "proyecto",
+                            "secuencia_didactica", "otro",
+                        ],
+                        "description": "Tipo de documento educativo.",
+                    },
+                },
+                "required": ["titulo", "contenido", "tipo_documento"],
+            },
+        }
+    ]
+}
 
 
 class OscarAgent:
-    """Main agent class. One instance per session."""
-
     def __init__(self, session_id: str):
         self.session_id = session_id
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY no está configurada en el archivo .env")
-        self.client = anthropic.Anthropic(api_key=api_key)
+        self.api_key = os.getenv("GEMINI_API_KEY")
+        if not self.api_key:
+            raise ValueError("GEMINI_API_KEY no está configurada en el archivo .env")
         self.model = DEFAULT_MODEL
 
     def chat(self, user_message: str) -> tuple[str, list[dict]]:
-        """
-        Send a user message and return (assistant_text, saved_files).
-        saved_files is a list of {"filename": ..., "filepath": ...} dicts.
-        """
         memory.add_message(self.session_id, "user", user_message)
-        messages = memory.get_messages(self.session_id)
-        saved_files = []
-        assistant_text = self._run_turn(messages, saved_files)
-        return assistant_text, saved_files
+        contents = self._build_contents(memory.get_messages(self.session_id))
+        saved_files: list[dict] = []
+        text = self._run(contents, saved_files)
+        memory.add_message(self.session_id, "assistant", text)
+        return text, saved_files
 
-    def _run_turn(self, messages: list[dict], saved_files: list[dict]) -> str:
-        """Execute one turn, handling tool_use loops."""
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT,
-            tools=TOOL_DEFINITIONS,
-            messages=messages,
-        )
+    def _run(self, contents: list[dict], saved_files: list[dict]) -> str:
+        url = f"{GEMINI_BASE}/{self.model}:generateContent?key={self.api_key}"
+        payload = {
+            "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+            "contents": contents,
+            "tools": [_TOOL_SCHEMA],
+            "generationConfig": {"maxOutputTokens": 8192},
+        }
+        resp = requests.post(url, json=payload, timeout=120)
+        resp.raise_for_status()
+        data = resp.json()
 
-        assistant_content = response.content
-        text_parts: list[str] = []
-        tool_uses: list = []
+        candidate = data["candidates"][0]
+        parts = candidate["content"]["parts"]
+        finish = candidate.get("finishReason", "STOP")
 
-        for block in assistant_content:
-            if block.type == "text":
-                text_parts.append(block.text)
-            elif block.type == "tool_use":
-                tool_uses.append(block)
+        fn_calls = [p["functionCall"] for p in parts if "functionCall" in p]
 
-        serializable_content = []
-        for block in assistant_content:
-            if block.type == "text":
-                serializable_content.append({"type": "text", "text": block.text})
-            elif block.type == "tool_use":
-                serializable_content.append({
-                    "type": "tool_use",
-                    "id": block.id,
-                    "name": block.name,
-                    "input": block.input,
-                })
-
-        memory.add_message(self.session_id, "assistant", serializable_content)
-
-        if response.stop_reason == "tool_use" and tool_uses:
+        if fn_calls:
             tool_results = []
-            for tool_use in tool_uses:
-                result = execute_tool(tool_use.name, tool_use.input)
-                if tool_use.name == "guardar_documento" and result.get("success"):
+            for fc in fn_calls:
+                result = execute_tool(fc["name"], fc["args"])
+                if fc["name"] == "guardar_documento" and result.get("success"):
                     saved_files.append({
                         "filename": result["filename"],
                         "filepath": result["filepath"],
                     })
                 tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_use.id,
-                    "content": json.dumps(result, ensure_ascii=False),
+                    "functionResponse": {
+                        "name": fc["name"],
+                        "response": {"result": json.dumps(result, ensure_ascii=False)},
+                    }
                 })
 
-            tool_result_message = {"role": "user", "content": tool_results}
-            memory.add_message(self.session_id, "user", tool_results)
+            contents = contents + [
+                {"role": "model", "parts": parts},
+                {"role": "user", "parts": tool_results},
+            ]
+            return self._run(contents, saved_files)
 
-            updated_messages = memory.get_messages(self.session_id)
-            return self._run_turn(updated_messages, saved_files)
+        return "\n".join(p["text"] for p in parts if "text" in p).strip()
 
-        return "\n".join(text_parts).strip()
+    def _build_contents(self, messages: list[dict]) -> list[dict]:
+        contents: list[dict] = []
+        for msg in messages:
+            role = msg["role"]
+            if role not in ("user", "assistant"):
+                continue
+            content = msg["content"]
+            if isinstance(content, list):
+                text = "\n".join(
+                    b["text"] for b in content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                ).strip()
+            else:
+                text = str(content).strip()
+            if not text:
+                continue
+            gemini_role = "user" if role == "user" else "model"
+            if contents and contents[-1]["role"] == gemini_role:
+                contents[-1]["parts"].append({"text": text})
+            else:
+                contents.append({"role": gemini_role, "parts": [{"text": text}]})
+        return contents
