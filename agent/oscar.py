@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from dotenv import load_dotenv
 import requests
 
@@ -74,8 +75,14 @@ class OscarAgent:
             "tools": [_TOOL_SCHEMA],
             "generationConfig": {"maxOutputTokens": 8192},
         }
-        resp = requests.post(url, json=payload, timeout=120)
-        resp.raise_for_status()
+        for attempt in range(4):
+            resp = requests.post(url, json=payload, timeout=120)
+            if resp.status_code == 429:
+                wait = 15 * (attempt + 1)
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            break
         data = resp.json()
 
         candidate = data["candidates"][0]
