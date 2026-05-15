@@ -161,10 +161,10 @@ agent = _get_agent(session_id)
 st.markdown("# 📚 OSCAR — Agente Docente")
 st.caption("Especialista en educación colombiana · Matemáticas · STEM · Investigación escolar")
 
-if not os.getenv("ANTHROPIC_API_KEY"):
+if not os.getenv("GEMINI_API_KEY"):
     st.warning(
-        "Configura tu `ANTHROPIC_API_KEY` en el archivo `.env` para comenzar. "
-        "Copia `.env.example` a `.env` y agrega tu clave.",
+        "Configura tu `GEMINI_API_KEY` en el archivo `.env` para comenzar. "
+        "Copia `.env.example` a `.env` y agrega tu clave de Google AI Studio.",
         icon="⚠️",
     )
     st.stop()
