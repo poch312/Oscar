@@ -349,7 +349,7 @@ def upload():
     )
     try:
         agent = OscarAgent(sid)
-        response_text, _ = agent.chat(context_msg)
+        response_text, _ = agent.process_upload(context_msg)
         return jsonify({"ok": True, "response": response_text})
     except Exception as e:
         return jsonify({"error": str(e)}), 500

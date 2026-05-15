@@ -67,6 +67,15 @@ class OscarAgent:
         memory.add_message(self.session_id, "assistant", text)
         return text, saved_files
 
+    def process_upload(self, context_msg: str) -> tuple[str, list[dict]]:
+        """Send document context to Gemini. Stored as 'system' so it's hidden in the UI."""
+        memory.add_message(self.session_id, "system", context_msg)
+        contents = self._build_contents(memory.get_messages(self.session_id))
+        saved_files: list[dict] = []
+        text = self._run(contents, saved_files)
+        memory.add_message(self.session_id, "assistant", text)
+        return text, saved_files
+
     def _run(self, contents: list[dict], saved_files: list[dict]) -> str:
         url = f"{GEMINI_BASE}/{self.model}:generateContent?key={self.api_key}"
         payload = {
@@ -130,7 +139,7 @@ class OscarAgent:
         contents: list[dict] = []
         for msg in messages:
             role = msg["role"]
-            if role not in ("user", "assistant"):
+            if role not in ("user", "assistant", "system"):
                 continue
             content = msg["content"]
             if isinstance(content, list):
@@ -142,7 +151,7 @@ class OscarAgent:
                 text = str(content).strip()
             if not text:
                 continue
-            gemini_role = "user" if role == "user" else "model"
+            gemini_role = "user" if role in ("user", "system") else "model"
             if contents and contents[-1]["role"] == gemini_role:
                 contents[-1]["parts"].append({"text": text})
             else:
