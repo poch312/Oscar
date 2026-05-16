@@ -94,7 +94,12 @@ class OscarAgent:
             if resp.status_code == 429:
                 time.sleep(10 * (attempt + 1))
                 continue
-            resp.raise_for_status()
+            if not resp.ok:
+                try:
+                    detail = resp.json().get("error", {}).get("message", resp.text[:400])
+                except Exception:
+                    detail = resp.text[:400]
+                raise ValueError(f"Error de Groq ({resp.status_code}): {detail}")
             break
         data = resp.json()
 

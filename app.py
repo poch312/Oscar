@@ -57,14 +57,14 @@ def _extract_text(file_bytes: bytes, filename: str) -> str:
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         text = "\n\n".join(p.get_text() for p in doc)
         doc.close()
-        return text[:80_000]
+        return text[:40_000]
     except ImportError:
         pass
     try:
         from pdfminer.high_level import extract_text as pdfminer_extract
         import io
         text = pdfminer_extract(io.BytesIO(file_bytes)) or ""
-        return text[:80_000]
+        return text[:40_000]
     except Exception as e:
         return f"[No se pudo extraer texto de '{filename}': {e}]"
 
@@ -445,7 +445,7 @@ def upload():
     if filename.lower().endswith(".pdf"):
         text = _extract_text(file_bytes, filename)
     else:
-        text = file_bytes.decode("utf-8", errors="replace")[:80_000]
+        text = file_bytes.decode("utf-8", errors="replace")[:40_000]
 
     memory.add_document(sid, filename, text)
     context_msg = (
