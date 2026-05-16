@@ -31,7 +31,7 @@ def _cleanup_jobs():
 def _job_worker(job_id: str, session_id: str, message: str):
     with _jobs_lock:
         _jobs[job_id]["status"] = "running"
-        _jobs[job_id]["progress"] = "Consultando Gemini..."
+        _jobs[job_id]["progress"] = "Consultando Groq..."
     try:
         msgs = memory.get_messages(session_id)
         if not any(m["role"] == "user" for m in msgs):
@@ -167,7 +167,7 @@ async function init() {
   if (!cfg.api_key_set) {
     const w = document.getElementById('api-warn');
     w.style.display='block';
-    w.textContent='Configura GEMINI_API_KEY en el archivo .env y reinicia el servidor.';
+    w.textContent='Configura GROQ_API_KEY en el archivo .env y reinicia el servidor.';
   }
   const sessions = await fetch('/api/sessions').then(r=>r.json());
   if (sessions.length > 0) { renderSessions(sessions); await switchSession(sessions[0].id); }
@@ -350,7 +350,7 @@ def index():
 
 @app.route("/api/config")
 def config():
-    return jsonify({"api_key_set": bool(os.getenv("GEMINI_API_KEY"))})
+    return jsonify({"api_key_set": bool(os.getenv("GROQ_API_KEY"))})
 
 
 @app.route("/api/sessions", methods=["GET"])

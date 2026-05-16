@@ -10,12 +10,13 @@ from . import memory
 
 load_dotenv()
 
-GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-DEFAULT_MODEL = os.getenv("OSCAR_MODEL", "gemini-2.0-flash")
+GROQ_BASE = "https://api.groq.com/openai/v1/chat/completions"
+DEFAULT_MODEL = os.getenv("OSCAR_MODEL", "llama-3.3-70b-versatile")
 
-_TOOL_SCHEMA = {
-    "function_declarations": [
-        {
+_TOOL_SCHEMA = [
+    {
+        "type": "function",
+        "function": {
             "name": "guardar_documento",
             "description": (
                 "Guarda un documento generado para que el docente pueda descargarlo. "
@@ -46,98 +47,92 @@ _TOOL_SCHEMA = {
                 },
                 "required": ["titulo", "contenido", "tipo_documento"],
             },
-        }
-    ]
-}
+        },
+    }
+]
 
 
 class OscarAgent:
     def __init__(self, session_id: str):
         self.session_id = session_id
-        self.api_key = os.getenv("GEMINI_API_KEY")
+        self.api_key = os.getenv("GROQ_API_KEY")
         if not self.api_key:
-            raise ValueError("GEMINI_API_KEY no está configurada en el archivo .env")
+            raise ValueError("GROQ_API_KEY no está configurada en el archivo .env")
         self.model = DEFAULT_MODEL
 
     def chat(self, user_message: str) -> tuple[str, list[dict]]:
         memory.add_message(self.session_id, "user", user_message)
-        contents = self._build_contents(memory.get_messages(self.session_id))
+        messages = self._build_messages(memory.get_messages(self.session_id))
         saved_files: list[dict] = []
-        text = self._run(contents, saved_files)
+        text = self._run(messages, saved_files)
         memory.add_message(self.session_id, "assistant", text)
         return text, saved_files
 
     def process_upload(self, context_msg: str) -> tuple[str, list[dict]]:
-        """Send document context to Gemini. Stored as 'system' so it's hidden in the UI."""
+        """Send document context to Groq. Stored as 'system' role, hidden in the UI."""
         memory.add_message(self.session_id, "system", context_msg)
-        contents = self._build_contents(memory.get_messages(self.session_id))
+        messages = self._build_messages(memory.get_messages(self.session_id))
         saved_files: list[dict] = []
-        text = self._run(contents, saved_files)
+        text = self._run(messages, saved_files)
         memory.add_message(self.session_id, "assistant", text)
         return text, saved_files
 
-    def _run(self, contents: list[dict], saved_files: list[dict]) -> str:
-        url = f"{GEMINI_BASE}/{self.model}:generateContent?key={self.api_key}"
+    def _run(self, messages: list[dict], saved_files: list[dict]) -> str:
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
         payload = {
-            "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-            "contents": contents,
-            "tools": [_TOOL_SCHEMA],
-            "generationConfig": {"maxOutputTokens": 8192},
+            "model": self.model,
+            "messages": messages,
+            "tools": _TOOL_SCHEMA,
+            "tool_choice": "auto",
+            "max_tokens": 8192,
         }
         for attempt in range(4):
-            resp = requests.post(url, json=payload, timeout=60)
+            resp = requests.post(GROQ_BASE, headers=headers, json=payload, timeout=60)
             if resp.status_code == 429:
-                wait = 10 * (attempt + 1)
-                time.sleep(wait)
+                time.sleep(10 * (attempt + 1))
                 continue
             resp.raise_for_status()
             break
         data = resp.json()
 
-        if "candidates" not in data or not data["candidates"]:
-            feedback = data.get("promptFeedback", {})
-            block_reason = feedback.get("blockReason", "")
-            if block_reason:
-                raise ValueError(f"Contenido bloqueado por Gemini ({block_reason}). Intenta reformular la solicitud.")
-            raise ValueError(f"Respuesta inesperada de la API: {data}")
+        if "choices" not in data or not data["choices"]:
+            raise ValueError(f"Respuesta inesperada de Groq: {data}")
 
-        candidate = data["candidates"][0]
-        finish = candidate.get("finishReason", "STOP")
+        choice = data["choices"][0]
+        msg = choice["message"]
+        tool_calls = msg.get("tool_calls") or []
 
-        if finish == "SAFETY" or "content" not in candidate:
-            raise ValueError("La respuesta fue bloqueada por filtros de seguridad. Intenta reformular la solicitud.")
-
-        parts = candidate["content"]["parts"]
-
-        fn_calls = [p["functionCall"] for p in parts if "functionCall" in p]
-
-        if fn_calls:
+        if tool_calls:
+            messages = messages + [msg]
             tool_results = []
-            for fc in fn_calls:
-                result = execute_tool(fc["name"], fc["args"])
-                if fc["name"] == "guardar_documento" and result.get("success"):
+            for tc in tool_calls:
+                name = tc["function"]["name"]
+                try:
+                    args = json.loads(tc["function"]["arguments"])
+                except json.JSONDecodeError:
+                    args = {}
+                result = execute_tool(name, args)
+                if name == "guardar_documento" and result.get("success"):
                     saved_files.append({
                         "filename": result["filename"],
                         "filepath": result["filepath"],
                     })
                 tool_results.append({
-                    "functionResponse": {
-                        "name": fc["name"],
-                        "response": {"result": json.dumps(result, ensure_ascii=False)},
-                    }
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": json.dumps(result, ensure_ascii=False),
                 })
+            messages = messages + tool_results
+            return self._run(messages, saved_files)
 
-            contents = contents + [
-                {"role": "model", "parts": parts},
-                {"role": "user", "parts": tool_results},
-            ]
-            return self._run(contents, saved_files)
+        return (msg.get("content") or "").strip()
 
-        return "\n".join(p["text"] for p in parts if "text" in p).strip()
-
-    def _build_contents(self, messages: list[dict]) -> list[dict]:
-        contents: list[dict] = []
-        for msg in messages:
+    def _build_messages(self, history: list[dict]) -> list[dict]:
+        messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        for msg in history:
             role = msg["role"]
             if role not in ("user", "assistant", "system"):
                 continue
@@ -151,9 +146,7 @@ class OscarAgent:
                 text = str(content).strip()
             if not text:
                 continue
-            gemini_role = "user" if role in ("user", "system") else "model"
-            if contents and contents[-1]["role"] == gemini_role:
-                contents[-1]["parts"].append({"text": text})
-            else:
-                contents.append({"role": gemini_role, "parts": [{"text": text}]})
-        return contents
+            # "system" role in memory = document upload context → sent as "user"
+            api_role = "user" if role == "system" else role
+            messages.append({"role": api_role, "content": text})
+        return messages
