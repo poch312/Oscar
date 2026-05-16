@@ -2,53 +2,12 @@ import re
 from pathlib import Path
 from datetime import datetime
 
-GENERADOS_DIR = Path("data/generados")
+from . import memory
 
-TOOL_DEFINITIONS = [
-    {
-        "name": "guardar_documento",
-        "description": (
-            "Guarda un documento generado en el sistema de archivos para que el docente pueda descargarlo. "
-            "Llama esta herramienta siempre que generes un documento completo listo para usar: "
-            "planeaciones, guías, talleres, rúbricas, evaluaciones, mallas curriculares, informes, actas, proyectos, etc."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "titulo": {
-                    "type": "string",
-                    "description": "Título descriptivo del documento (ej: 'Planeación_Matemáticas_Grado7_Periodo2').",
-                },
-                "contenido": {
-                    "type": "string",
-                    "description": "Contenido completo del documento en texto plano con formato Markdown.",
-                },
-                "tipo_documento": {
-                    "type": "string",
-                    "enum": [
-                        "planeacion",
-                        "guia",
-                        "taller",
-                        "rubrica",
-                        "evaluacion",
-                        "malla_curricular",
-                        "informe",
-                        "acta",
-                        "proyecto",
-                        "secuencia_didactica",
-                        "otro",
-                    ],
-                    "description": "Tipo de documento educativo.",
-                },
-            },
-            "required": ["titulo", "contenido", "tipo_documento"],
-        },
-    }
-]
+GENERADOS_DIR = Path("data/generados")
 
 
 def guardar_documento(titulo: str, contenido: str, tipo_documento: str) -> dict:
-    """Save a generated document to disk and return its path."""
     GENERADOS_DIR.mkdir(parents=True, exist_ok=True)
     safe_title = re.sub(r"[^\w\s-]", "", titulo).strip().replace(" ", "_")[:60]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -63,6 +22,20 @@ def guardar_documento(titulo: str, contenido: str, tipo_documento: str) -> dict:
     }
 
 
+def buscar_en_base(consulta: str) -> dict:
+    results = memory.search_kb(consulta, limit=5)
+    if not results:
+        return {
+            "found": False,
+            "message": "No se encontró información relevante en la base de conocimiento para esa consulta.",
+        }
+    context = "\n\n---\n\n".join(
+        f"[Fuente: {r['filename']}]\n{r['content']}" for r in results
+    )
+    sources = list(dict.fromkeys(r["filename"] for r in results))
+    return {"found": True, "context": context, "fuentes": sources}
+
+
 def execute_tool(name: str, tool_input: dict) -> dict:
     if name == "guardar_documento":
         return guardar_documento(
@@ -70,4 +43,6 @@ def execute_tool(name: str, tool_input: dict) -> dict:
             contenido=tool_input["contenido"],
             tipo_documento=tool_input["tipo_documento"],
         )
+    if name == "buscar_en_base":
+        return buscar_en_base(consulta=tool_input["consulta"])
     return {"success": False, "message": f"Herramienta '{name}' no reconocida."}

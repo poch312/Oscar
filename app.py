@@ -128,7 +128,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   <div class="lbl">Conversaciones</div>
   <div id="session-list"></div>
   <hr class="divider">
-  <div class="lbl">Documentos cargados</div>
+  <div class="lbl">Base de Conocimiento</div>
+  <input type="file" id="kb-file-input" accept=".pdf,.txt" style="display:none" onchange="uploadToKB()">
+  <label for="kb-file-input" style="cursor:pointer;color:#667eea;font-size:11px;display:block;padding:5px 8px;border-radius:6px;border:1px dashed #4a5568;text-align:center;margin-bottom:4px">+ Agregar documento permanente</label>
+  <div id="kb-list"></div>
+  <hr class="divider">
+  <div class="lbl">Documentos de sesion</div>
   <input type="file" id="file-input" accept=".pdf,.txt" style="display:none" onchange="uploadFile()">
   <div id="docs-list"></div>
 </div>
@@ -162,6 +167,43 @@ function closeSidebar() {
   document.getElementById('overlay').classList.remove('open');
 }
 
+async function loadKB(){
+  const docs=await fetch('/api/kb').then(r=>r.json());
+  const list=document.getElementById('kb-list');
+  list.innerHTML='';
+  for(const d of docs){
+    const el=document.createElement('div');
+    el.className='doc-item';
+    el.style.cssText='display:flex;align-items:center;gap:4px';
+    el.innerHTML='<span style="flex:1;overflow:hidden;text-overflow:ellipsis">&#128218; '+d.filename+'</span>'
+      +'<span style="color:#fc8181;cursor:pointer;font-size:13px;flex-shrink:0" onclick="deleteFromKB(\''+encodeURIComponent(d.filename)+'\')">x</span>';
+    list.appendChild(el);
+  }
+}
+
+async function uploadToKB(){
+  const input=document.getElementById('kb-file-input');
+  const file=input.files[0];
+  if(!file)return;
+  const placeholder=document.createElement('div');
+  placeholder.className='doc-item';
+  placeholder.textContent='Indexando '+file.name+'...';
+  document.getElementById('kb-list').prepend(placeholder);
+  const fd=new FormData();
+  fd.append('file',file);
+  try{
+    const res=await fetch('/api/kb/upload',{method:'POST',body:fd}).then(r=>r.json());
+    if(res.error) placeholder.textContent='Error: '+res.error;
+    else await loadKB();
+  }catch(e){placeholder.textContent='Error al subir.';}
+  input.value='';
+}
+
+async function deleteFromKB(filename){
+  await fetch('/api/kb/'+filename,{method:'DELETE'});
+  await loadKB();
+}
+
 async function init() {
   const cfg = await fetch('/api/config').then(r=>r.json());
   if (!cfg.api_key_set) {
@@ -172,6 +214,7 @@ async function init() {
   const sessions = await fetch('/api/sessions').then(r=>r.json());
   if (sessions.length > 0) { renderSessions(sessions); await switchSession(sessions[0].id); }
   else await newSession();
+  await loadKB();
 }
 
 async function newSession() {
@@ -459,6 +502,32 @@ def upload():
         return jsonify({"ok": True, "response": response_text})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/kb")
+def list_kb():
+    return jsonify(memory.list_kb_documents())
+
+
+@app.route("/api/kb/upload", methods=["POST"])
+def upload_kb():
+    file = request.files.get("file")
+    if not file:
+        return jsonify({"error": "No se recibió archivo"}), 400
+    filename = file.filename
+    file_bytes = file.read()
+    if filename.lower().endswith(".pdf"):
+        text = _extract_text(file_bytes, filename)
+    else:
+        text = file_bytes.decode("utf-8", errors="replace")[:200_000]
+    chunks = memory.add_kb_document(filename, text)
+    return jsonify({"ok": True, "filename": filename, "chunks": chunks})
+
+
+@app.route("/api/kb/<path:filename>", methods=["DELETE"])
+def delete_kb(filename):
+    memory.delete_kb_document(filename)
+    return jsonify({"ok": True})
 
 
 @app.route("/api/download/<filename>")

@@ -1,5 +1,6 @@
 import sqlite3
 import json
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -37,10 +38,33 @@ def init_db() -> None:
             uploaded_at TEXT NOT NULL,
             FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
         );
+        CREATE TABLE IF NOT EXISTS kb_documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL UNIQUE,
+            chunks INTEGER DEFAULT 0,
+            uploaded_at TEXT DEFAULT (datetime('now'))
+        );
     """)
+    try:
+        c.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts USING fts5(
+                filename UNINDEXED,
+                content,
+                tokenize="unicode61"
+            )
+        """)
+    except Exception:
+        c.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts USING fts5(
+                filename UNINDEXED,
+                content
+            )
+        """)
     conn.commit()
     conn.close()
 
+
+# ── Session helpers ────────────────────────────────────────────────────────────
 
 def create_session(name: str = "Nueva conversación") -> str:
     session_id = str(uuid.uuid4())
@@ -77,8 +101,9 @@ def delete_session(session_id: str) -> None:
     conn.close()
 
 
+# ── Message helpers ────────────────────────────────────────────────────────────
+
 def add_message(session_id: str, role: str, content) -> None:
-    """Store a message. content can be a string or a list (for tool_use blocks)."""
     content_str = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
     conn = _connect()
     conn.execute(
@@ -90,7 +115,6 @@ def add_message(session_id: str, role: str, content) -> None:
 
 
 def get_messages(session_id: str) -> list[dict]:
-    """Return messages in Claude API format."""
     conn = _connect()
     rows = conn.execute(
         "SELECT role, content FROM messages WHERE session_id = ? ORDER BY id",
@@ -106,6 +130,8 @@ def get_messages(session_id: str) -> list[dict]:
         messages.append({"role": role, "content": content})
     return messages
 
+
+# ── Session document helpers ───────────────────────────────────────────────────
 
 def add_document(session_id: str, filename: str, content: str) -> None:
     conn = _connect()
@@ -132,6 +158,96 @@ def document_exists(session_id: str, filename: str) -> bool:
     row = conn.execute(
         "SELECT id FROM documents WHERE session_id = ? AND filename = ?",
         (session_id, filename),
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
+# ── Knowledge base helpers ─────────────────────────────────────────────────────
+
+def _chunk_text(text: str, size: int = 800) -> list[str]:
+    """Split text into chunks on paragraph boundaries."""
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    chunks: list[str] = []
+    current = ""
+    for para in paragraphs:
+        if len(current) + len(para) + 2 <= size:
+            current = (current + "\n\n" + para).strip() if current else para
+        else:
+            if current:
+                chunks.append(current)
+            if len(para) > size:
+                for i in range(0, len(para), size):
+                    chunks.append(para[i : i + size])
+                current = ""
+            else:
+                current = para
+    if current:
+        chunks.append(current)
+    return chunks or [text[:size]]
+
+
+def _fts_query(query: str) -> str:
+    """Sanitize query for FTS5: extract word tokens."""
+    terms = re.findall(r"[\wÀ-ɏ]+", query)
+    return " ".join(f'"{t}"' for t in terms) if terms else '""'
+
+
+def add_kb_document(filename: str, text: str) -> int:
+    """Chunk text and index in the knowledge base. Returns chunk count."""
+    chunks = _chunk_text(text)
+    conn = _connect()
+    conn.execute("DELETE FROM kb_fts WHERE filename = ?", (filename,))
+    conn.execute("DELETE FROM kb_documents WHERE filename = ?", (filename,))
+    for chunk in chunks:
+        conn.execute(
+            "INSERT INTO kb_fts (filename, content) VALUES (?, ?)",
+            (filename, chunk),
+        )
+    conn.execute(
+        "INSERT OR REPLACE INTO kb_documents (filename, chunks, uploaded_at) VALUES (?, ?, ?)",
+        (filename, len(chunks), datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+    return len(chunks)
+
+
+def search_kb(query: str, limit: int = 5) -> list[dict]:
+    """Full-text search over the knowledge base."""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT filename, content FROM kb_fts WHERE content MATCH ? ORDER BY rank LIMIT ?",
+            (_fts_query(query), limit),
+        ).fetchall()
+    except Exception:
+        rows = []
+    conn.close()
+    return [{"filename": r[0], "content": r[1]} for r in rows]
+
+
+def list_kb_documents() -> list[dict]:
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT filename, chunks, uploaded_at FROM kb_documents ORDER BY uploaded_at DESC"
+    ).fetchall()
+    conn.close()
+    return [{"filename": r[0], "chunks": r[1], "uploaded_at": r[2]} for r in rows]
+
+
+def delete_kb_document(filename: str) -> None:
+    conn = _connect()
+    conn.execute("DELETE FROM kb_fts WHERE filename = ?", (filename,))
+    conn.execute("DELETE FROM kb_documents WHERE filename = ?", (filename,))
+    conn.commit()
+    conn.close()
+
+
+def kb_document_exists(filename: str) -> bool:
+    conn = _connect()
+    row = conn.execute(
+        "SELECT id FROM kb_documents WHERE filename = ?", (filename,)
     ).fetchone()
     conn.close()
     return row is not None

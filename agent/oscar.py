@@ -17,6 +17,31 @@ _TOOL_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "buscar_en_base",
+            "description": (
+                "Busca información en la base de conocimiento institucional. "
+                "Úsala SIEMPRE que el docente pida estándares básicos, DBA, formatos "
+                "institucionales, lineamientos curriculares u otros documentos de referencia. "
+                "Es la fuente principal de verdad — consúltala antes de responder sobre normativa o formatos."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "consulta": {
+                        "type": "string",
+                        "description": (
+                            "Términos de búsqueda específicos "
+                            "(ej: 'DBA matemáticas grado 9', 'estándares álgebra', 'formato plan de área')"
+                        ),
+                    }
+                },
+                "required": ["consulta"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "guardar_documento",
             "description": (
                 "Guarda un documento generado para que el docente pueda descargarlo. "
