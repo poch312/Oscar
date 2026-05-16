@@ -21,6 +21,13 @@ def _extract_text(file_bytes: bytes, filename: str) -> str:
         text = "\n\n".join(p.get_text() for p in doc)
         doc.close()
         return text[:80_000]
+    except ImportError:
+        pass
+    try:
+        from pdfminer.high_level import extract_text as pdfminer_extract
+        import io
+        text = pdfminer_extract(io.BytesIO(file_bytes)) or ""
+        return text[:80_000]
     except Exception as e:
         return f"[No se pudo extraer texto de '{filename}': {e}]"
 
