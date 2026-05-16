@@ -1,4 +1,7 @@
 import os
+import threading
+import uuid
+import time as time_lib
 from pathlib import Path
 from dotenv import load_dotenv
 import requests as req_lib
@@ -12,6 +15,40 @@ from agent.oscar import OscarAgent
 memory.init_db()
 
 app = Flask(__name__)
+
+_jobs: dict = {}
+_jobs_lock = threading.Lock()
+_JOB_TTL = 600
+
+
+def _cleanup_jobs():
+    now = time_lib.monotonic()
+    expired = [jid for jid, j in _jobs.items() if now - j["created_at"] > _JOB_TTL]
+    for jid in expired:
+        del _jobs[jid]
+
+
+def _job_worker(job_id: str, session_id: str, message: str):
+    with _jobs_lock:
+        _jobs[job_id]["status"] = "running"
+        _jobs[job_id]["progress"] = "Consultando Gemini..."
+    try:
+        msgs = memory.get_messages(session_id)
+        if not any(m["role"] == "user" for m in msgs):
+            memory.update_session_name(session_id, message[:50])
+        agent = OscarAgent(session_id)
+        text, saved_files = agent.chat(message)
+        with _jobs_lock:
+            _jobs[job_id]["status"] = "done"
+            _jobs[job_id]["result"] = {"text": text, "saved_files": saved_files}
+    except req_lib.exceptions.Timeout:
+        with _jobs_lock:
+            _jobs[job_id]["status"] = "error"
+            _jobs[job_id]["error"] = "La red es lenta. Espera unos segundos y vuelve a intentarlo."
+    except Exception as e:
+        with _jobs_lock:
+            _jobs[job_id]["status"] = "error"
+            _jobs[job_id]["error"] = str(e)
 
 
 def _extract_text(file_bytes: bytes, filename: str) -> str:
@@ -114,6 +151,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </div>
 <script>
 let sid = null;
+let _currentPollTimer = null;
 
 function toggleSidebar() {
   document.getElementById('sidebar').classList.toggle('open');
@@ -198,16 +236,6 @@ function addMsg(role,text,downloads=[]){
   return d;
 }
 
-async function fetchWithTimeout(url, options, ms=90000){
-  const ctrl=new AbortController();
-  const tid=setTimeout(()=>ctrl.abort(),ms);
-  try{
-    const r=await fetch(url,{...options,signal:ctrl.signal});
-    clearTimeout(tid);
-    return r;
-  }catch(e){clearTimeout(tid);throw e;}
-}
-
 async function sendMessage(){
   const input=document.getElementById('user-input');
   const text=input.value.trim();
@@ -219,22 +247,61 @@ async function sendMessage(){
   const thinking=addMsg('assistant','OSCAR esta pensando...');
   thinking.classList.add('thinking');
   btn.disabled=true;
+  if(_currentPollTimer){clearTimeout(_currentPollTimer);_currentPollTimer=null;}
   try{
-    const res=await fetchWithTimeout('/api/chat',{
+    const res=await fetch('/api/chat',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({session_id:sid,message:text})
-    }).then(r=>r.json());
-    thinking.remove();
-    if(res.error) addMsg('assistant','Error: '+res.error);
-    else{addMsg('assistant',res.text,res.saved_files||[]);refreshSessions();}
+    });
+    if(!res.ok){
+      const err=await res.json().catch(()=>({error:'Error desconocido'}));
+      thinking.remove();
+      addMsg('assistant','Error: '+(err.error||res.status));
+      btn.disabled=false;
+      return;
+    }
+    const data=await res.json();
+    _pollJob(data.job_id,thinking,btn,Date.now(),0);
   }catch(e){
     thinking.remove();
-    addMsg('assistant', e.name==='AbortError'
-      ? 'Tiempo de espera agotado (90s). La red esta lenta, intenta de nuevo.'
-      : 'Error de conexion. Verifica que el servidor este corriendo.');
+    addMsg('assistant','Error de conexion. Verifica que el servidor este corriendo.');
+    btn.disabled=false;
   }
-  btn.disabled=false;
+}
+
+function _pollJob(job_id,thinkingEl,btn,startTime,errCount){
+  const POLL=2000,MAX_WAIT=180000,MAX_ERR=5;
+  _currentPollTimer=setTimeout(async()=>{
+    if(Date.now()-startTime>MAX_WAIT){
+      thinkingEl.remove();
+      addMsg('assistant','Tiempo de espera agotado (3 min). Intenta de nuevo.');
+      btn.disabled=false; return;
+    }
+    try{
+      const res=await fetch('/api/job/'+job_id);
+      const data=await res.json();
+      if(data.status==='done'){
+        thinkingEl.remove();
+        addMsg('assistant',data.text,data.saved_files||[]);
+        refreshSessions(); btn.disabled=false; _currentPollTimer=null; return;
+      }
+      if(data.status==='error'||data.status==='expired'){
+        thinkingEl.remove();
+        addMsg('assistant','Error: '+(data.error||'Resultado no disponible'));
+        btn.disabled=false; _currentPollTimer=null; return;
+      }
+      if(data.progress) thinkingEl.textContent='OSCAR esta pensando... ('+data.progress+')';
+      _pollJob(job_id,thinkingEl,btn,startTime,0);
+    }catch(e){
+      if(errCount+1>=MAX_ERR){
+        thinkingEl.remove();
+        addMsg('assistant','Se perdio la conexion. Refresca la pagina cuando se recupere.');
+        btn.disabled=false; return;
+      }
+      _pollJob(job_id,thinkingEl,btn,startTime,errCount+1);
+    }
+  },POLL);
 }
 
 async function uploadFile(){
@@ -326,23 +393,41 @@ def get_messages(sid):
 @app.route("/api/chat", methods=["POST"])
 def chat():
     data = request.get_json()
-    sid = data.get("session_id")
+    session_id = data.get("session_id")
     message = (data.get("message") or "").strip()
-    if not sid or not message:
+    if not session_id or not message:
         return jsonify({"error": "Faltan session_id o message"}), 400
+    job_id = str(uuid.uuid4())
+    with _jobs_lock:
+        _cleanup_jobs()
+        _jobs[job_id] = {
+            "status": "pending",
+            "result": None,
+            "error": None,
+            "created_at": time_lib.monotonic(),
+            "session_id": session_id,
+            "progress": "Iniciando...",
+        }
+    t = threading.Thread(target=_job_worker, args=(job_id, session_id, message), daemon=True)
+    t.start()
+    return jsonify({"job_id": job_id}), 202
 
-    msgs = memory.get_messages(sid)
-    if not any(m["role"] == "user" for m in msgs):
-        memory.update_session_name(sid, message[:50])
 
-    try:
-        agent = OscarAgent(sid)
-        text, saved_files = agent.chat(message)
-        return jsonify({"text": text, "saved_files": saved_files})
-    except req_lib.exceptions.Timeout:
-        return jsonify({"error": "La red es lenta. Espera unos segundos y vuelve a intentarlo."}), 504
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+@app.route("/api/job/<job_id>")
+def get_job(job_id: str):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if job is None:
+        return jsonify({"status": "expired", "error": "Resultado no disponible. Reintenta."}), 404
+    if job["status"] == "done":
+        with _jobs_lock:
+            _jobs.pop(job_id, None)
+        return jsonify({"status": "done", "text": job["result"]["text"], "saved_files": job["result"]["saved_files"]})
+    if job["status"] == "error":
+        with _jobs_lock:
+            _jobs.pop(job_id, None)
+        return jsonify({"status": "error", "error": job["error"]})
+    return jsonify({"status": job["status"], "progress": job["progress"]})
 
 
 @app.route("/api/upload", methods=["POST"])
