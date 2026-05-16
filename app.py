@@ -198,17 +198,29 @@ function addMsg(role,text,downloads=[]){
   return d;
 }
 
+async function fetchWithTimeout(url, options, ms=90000){
+  const ctrl=new AbortController();
+  const tid=setTimeout(()=>ctrl.abort(),ms);
+  try{
+    const r=await fetch(url,{...options,signal:ctrl.signal});
+    clearTimeout(tid);
+    return r;
+  }catch(e){clearTimeout(tid);throw e;}
+}
+
 async function sendMessage(){
   const input=document.getElementById('user-input');
   const text=input.value.trim();
   if(!text||!sid)return;
+  const btn=document.getElementById('send-btn');
+  if(btn.disabled)return;
   input.value=''; input.style.height='auto';
   addMsg('user',text);
   const thinking=addMsg('assistant','OSCAR esta pensando...');
   thinking.classList.add('thinking');
-  document.getElementById('send-btn').disabled=true;
+  btn.disabled=true;
   try{
-    const res=await fetch('/api/chat',{
+    const res=await fetchWithTimeout('/api/chat',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({session_id:sid,message:text})
@@ -218,9 +230,11 @@ async function sendMessage(){
     else{addMsg('assistant',res.text,res.saved_files||[]);refreshSessions();}
   }catch(e){
     thinking.remove();
-    addMsg('assistant','Error de conexion. Verifica que el servidor este corriendo.');
+    addMsg('assistant', e.name==='AbortError'
+      ? 'Tiempo de espera agotado (90s). La red esta lenta, intenta de nuevo.'
+      : 'Error de conexion. Verifica que el servidor este corriendo.');
   }
-  document.getElementById('send-btn').disabled=false;
+  btn.disabled=false;
 }
 
 async function uploadFile(){
@@ -372,4 +386,4 @@ def download(filename):
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
