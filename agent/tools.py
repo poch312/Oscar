@@ -23,7 +23,7 @@ def guardar_documento(titulo: str, contenido: str, tipo_documento: str) -> dict:
 
 
 def buscar_en_base(consulta: str) -> dict:
-    results = memory.search_kb(consulta, limit=5)
+    results = memory.search_kb(consulta, limit=3)
     if not results:
         return {
             "found": False,

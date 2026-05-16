@@ -112,7 +112,7 @@ class OscarAgent:
             "messages": messages,
             "tools": _TOOL_SCHEMA,
             "tool_choice": "auto",
-            "max_tokens": 8192,
+            "max_tokens": 4096,
         }
         for attempt in range(4):
             resp = requests.post(GROQ_BASE, headers=headers, json=payload, timeout=60)
@@ -161,7 +161,7 @@ class OscarAgent:
         return (msg.get("content") or "").strip()
 
     def _build_messages(self, history: list[dict]) -> list[dict]:
-        messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        all_msgs: list[dict] = []
         for msg in history:
             role = msg["role"]
             if role not in ("user", "assistant", "system"):
@@ -176,7 +176,22 @@ class OscarAgent:
                 text = str(content).strip()
             if not text:
                 continue
-            # "system" role in memory = document upload context → sent as "user"
             api_role = "user" if role == "system" else role
-            messages.append({"role": api_role, "content": text})
-        return messages
+            all_msgs.append({"role": api_role, "content": text})
+
+        # Keep only the most recent messages that fit within ~25k chars of history.
+        # This prevents unbounded context growth when OSCAR generates long documents.
+        MAX_HISTORY_CHARS = 25_000
+        trimmed: list[dict] = []
+        used = 0
+        for msg in reversed(all_msgs):
+            used += len(msg["content"])
+            if used > MAX_HISTORY_CHARS:
+                break
+            trimmed.insert(0, msg)
+
+        # Groq requires the first message to be from the user.
+        while trimmed and trimmed[0]["role"] != "user":
+            trimmed.pop(0)
+
+        return [{"role": "system", "content": SYSTEM_PROMPT}] + trimmed
