@@ -93,9 +93,8 @@ class OscarAgent:
     def chat(self, user_message: str) -> tuple[str, list[dict]]:
         memory.add_message(self.session_id, "user", user_message)
         intent = detect_intent(user_message)
-        messages = self._build_messages(
-            memory.get_messages(self.session_id), intent
-        )
+        messages = self._build_messages(memory.get_messages(self.session_id), intent)
+        messages = self._inject_kb(messages, user_message, intent)
         saved_files: list[dict] = []
         text = self._run(messages, saved_files)
         memory.add_message(self.session_id, "assistant", text)
@@ -104,9 +103,7 @@ class OscarAgent:
     def process_upload(self, context_msg: str) -> tuple[str, list[dict]]:
         """Inject document context (stored as 'system', hidden in UI)."""
         memory.add_message(self.session_id, "system", context_msg)
-        messages = self._build_messages(
-            memory.get_messages(self.session_id), "general"
-        )
+        messages = self._build_messages(memory.get_messages(self.session_id), "general")
         saved_files: list[dict] = []
         text = self._run(messages, saved_files)
         memory.add_message(self.session_id, "assistant", text)
@@ -145,6 +142,34 @@ class OscarAgent:
 
         messages = messages + tool_results
         return self._run(messages, saved_files)
+
+    def _inject_kb(self, messages: list[dict], query: str, intent: str) -> list[dict]:
+        """
+        Proactive RAG: always search the KB and inject results into the last
+        user message. The LLM sees the evidence before it generates anything.
+        No dependency on the model deciding to call buscar_en_base.
+        """
+        if intent == "general":
+            return messages
+        results = memory.search_kb(query, limit=3)
+        if not results:
+            return messages
+        block = "\n\n".join(
+            f"[Fuente: {r['filename']}]\n{r['content']}" for r in results
+        )
+        note = (
+            "\n\n[INFORMACIÓN DE TU BASE DE CONOCIMIENTO — úsala como fuente principal]\n"
+            + block
+        )
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i]["role"] == "user":
+                messages = (
+                    messages[:i]
+                    + [{"role": "user", "content": messages[i]["content"] + note}]
+                    + messages[i + 1 :]
+                )
+                break
+        return messages
 
     def _build_messages(self, history: list[dict], intent: str) -> list[dict]:
         # Compose system prompt: base + specialized agent extension + institutional context
