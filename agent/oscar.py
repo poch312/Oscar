@@ -1,17 +1,22 @@
-import os
+"""
+OSCAR Agent — multi-agent orchestrator.
+
+Architecture:
+  User message
+    → supervisor.detect_intent()        (keyword routing, 0 LLM calls)
+    → build system prompt               (base + specialized extension + institutional context)
+    → LLMProvider.complete()            (single LLM call per turn)
+    → tool loop (buscar_en_base / guardar_documento)
+    → response
+"""
 import json
-import time
-from dotenv import load_dotenv
-import requests
 
 from .prompts import SYSTEM_PROMPT
+from .specialized_prompts import AGENT_PROMPTS
+from .supervisor import detect_intent
+from .providers import LLMProvider
 from .tools import execute_tool
 from . import memory
-
-load_dotenv()
-
-GROQ_BASE = "https://api.groq.com/openai/v1/chat/completions"
-DEFAULT_MODEL = os.getenv("OSCAR_MODEL", "llama-3.3-70b-versatile")
 
 _TOOL_SCHEMA = [
     {
@@ -22,7 +27,7 @@ _TOOL_SCHEMA = [
                 "Busca información en la base de conocimiento institucional. "
                 "Úsala SIEMPRE que el docente pida estándares básicos, DBA, formatos "
                 "institucionales, lineamientos curriculares u otros documentos de referencia. "
-                "Es la fuente principal de verdad — consúltala antes de responder sobre normativa o formatos."
+                "Es la fuente principal de verdad — consúltala antes de responder sobre normativa."
             ),
             "parameters": {
                 "type": "object",
@@ -45,9 +50,8 @@ _TOOL_SCHEMA = [
             "name": "guardar_documento",
             "description": (
                 "Guarda un documento generado para que el docente pueda descargarlo. "
-                "Llama esta herramienta siempre que generes un documento completo listo para usar: "
-                "planeaciones, guías, talleres, rúbricas, evaluaciones, mallas curriculares, "
-                "informes, actas, proyectos, etc."
+                "Llama esta herramienta SIEMPRE que generes un documento completo listo para usar: "
+                "planeaciones, guías, talleres, rúbricas, evaluaciones, mallas, informes, actas, proyectos, etc."
             ),
             "parameters": {
                 "type": "object",
@@ -73,95 +77,86 @@ _TOOL_SCHEMA = [
                 "required": ["titulo", "contenido", "tipo_documento"],
             },
         },
-    }
+    },
 ]
 
 
 class OscarAgent:
+    """Main agent. Maintains the same public interface as before."""
+
     def __init__(self, session_id: str):
         self.session_id = session_id
-        self.api_key = os.getenv("GROQ_API_KEY")
-        if not self.api_key:
-            raise ValueError("GROQ_API_KEY no está configurada en el archivo .env")
-        self.model = DEFAULT_MODEL
+        self.provider = LLMProvider()
+
+    # ── Public interface ───────────────────────────────────────────────────────
 
     def chat(self, user_message: str) -> tuple[str, list[dict]]:
         memory.add_message(self.session_id, "user", user_message)
-        messages = self._build_messages(memory.get_messages(self.session_id))
+        intent = detect_intent(user_message)
+        messages = self._build_messages(
+            memory.get_messages(self.session_id), intent
+        )
         saved_files: list[dict] = []
         text = self._run(messages, saved_files)
         memory.add_message(self.session_id, "assistant", text)
         return text, saved_files
 
     def process_upload(self, context_msg: str) -> tuple[str, list[dict]]:
-        """Send document context to Groq. Stored as 'system' role, hidden in the UI."""
+        """Inject document context (stored as 'system', hidden in UI)."""
         memory.add_message(self.session_id, "system", context_msg)
-        messages = self._build_messages(memory.get_messages(self.session_id))
+        messages = self._build_messages(
+            memory.get_messages(self.session_id), "general"
+        )
         saved_files: list[dict] = []
         text = self._run(messages, saved_files)
         memory.add_message(self.session_id, "assistant", text)
         return text, saved_files
 
+    # ── Internal ───────────────────────────────────────────────────────────────
+
     def _run(self, messages: list[dict], saved_files: list[dict]) -> str:
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "tools": _TOOL_SCHEMA,
-            "tool_choice": "auto",
-            "max_tokens": 4096,
-        }
-        for attempt in range(4):
-            resp = requests.post(GROQ_BASE, headers=headers, json=payload, timeout=60)
-            if resp.status_code == 429:
-                time.sleep(10 * (attempt + 1))
-                continue
-            if not resp.ok:
-                try:
-                    detail = resp.json().get("error", {}).get("message", resp.text[:400])
-                except Exception:
-                    detail = resp.text[:400]
-                raise ValueError(f"Error de Groq ({resp.status_code}): {detail}")
-            break
-        data = resp.json()
-
-        if "choices" not in data or not data["choices"]:
-            raise ValueError(f"Respuesta inesperada de Groq: {data}")
-
-        choice = data["choices"][0]
-        msg = choice["message"]
+        msg = self.provider.complete(messages, tools=_TOOL_SCHEMA)
         tool_calls = msg.get("tool_calls") or []
 
-        if tool_calls:
-            messages = messages + [msg]
-            tool_results = []
-            for tc in tool_calls:
-                name = tc["function"]["name"]
-                try:
-                    args = json.loads(tc["function"]["arguments"])
-                except json.JSONDecodeError:
-                    args = {}
-                result = execute_tool(name, args)
-                if name == "guardar_documento" and result.get("success"):
-                    saved_files.append({
-                        "filename": result["filename"],
-                        "filepath": result["filepath"],
-                    })
-                tool_results.append({
-                    "role": "tool",
-                    "tool_call_id": tc["id"],
-                    "content": json.dumps(result, ensure_ascii=False),
+        if not tool_calls:
+            return (msg.get("content") or "").strip()
+
+        # Tool execution loop
+        messages = messages + [msg]
+        tool_results = []
+        for tc in tool_calls:
+            name = tc["function"]["name"]
+            try:
+                args = json.loads(tc["function"]["arguments"])
+            except json.JSONDecodeError:
+                args = {}
+            result = execute_tool(name, args)
+            if name == "guardar_documento" and result.get("success"):
+                saved_files.append({
+                    "filename": result["filename"],
+                    "filepath": result["filepath"],
+                    "format": result.get("format", "txt"),
                 })
-            messages = messages + tool_results
-            return self._run(messages, saved_files)
+            tool_results.append({
+                "role": "tool",
+                "tool_call_id": tc["id"],
+                "content": json.dumps(result, ensure_ascii=False),
+            })
 
-        return (msg.get("content") or "").strip()
+        messages = messages + tool_results
+        return self._run(messages, saved_files)
 
-    def _build_messages(self, history: list[dict]) -> list[dict]:
-        all_msgs: list[dict] = []
+    def _build_messages(self, history: list[dict], intent: str) -> list[dict]:
+        # Compose system prompt: base + specialized agent extension + institutional context
+        ctx = memory.get_institutional_context()
+        system_content = (
+            SYSTEM_PROMPT
+            + AGENT_PROMPTS.get(intent, "")
+            + memory.build_institutional_prompt(ctx)
+        )
+
+        # Flatten history to plain text messages
+        flat: list[dict] = []
         for msg in history:
             role = msg["role"]
             if role not in ("user", "assistant", "system"):
@@ -176,22 +171,22 @@ class OscarAgent:
                 text = str(content).strip()
             if not text:
                 continue
+            # "system" role in memory = document upload context → sent as "user"
             api_role = "user" if role == "system" else role
-            all_msgs.append({"role": api_role, "content": text})
+            flat.append({"role": api_role, "content": text})
 
-        # Keep only the most recent messages that fit within ~25k chars of history.
-        # This prevents unbounded context growth when OSCAR generates long documents.
-        MAX_HISTORY_CHARS = 25_000
+        # Trim to avoid unbounded context growth
+        MAX_CHARS = 25_000
         trimmed: list[dict] = []
         used = 0
-        for msg in reversed(all_msgs):
+        for msg in reversed(flat):
             used += len(msg["content"])
-            if used > MAX_HISTORY_CHARS:
+            if used > MAX_CHARS:
                 break
             trimmed.insert(0, msg)
 
-        # Groq requires the first message to be from the user.
+        # First message must be from user (OpenAI/Groq requirement)
         while trimmed and trimmed[0]["role"] != "user":
             trimmed.pop(0)
 
-        return [{"role": "system", "content": SYSTEM_PROMPT}] + trimmed
+        return [{"role": "system", "content": system_content}] + trimmed

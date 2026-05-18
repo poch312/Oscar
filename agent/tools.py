@@ -8,6 +8,16 @@ GENERADOS_DIR = Path("data/generados")
 
 
 def guardar_documento(titulo: str, contenido: str, tipo_documento: str) -> dict:
+    """Save document — DOCX if python-docx is available, TXT otherwise."""
+    try:
+        from documents.generator import save_document
+        ctx = memory.get_institutional_context()
+        institucion = ctx.get("nombre_institucion", "")
+        return save_document(titulo, contenido, tipo_documento, institucion)
+    except Exception:
+        pass
+
+    # Pure TXT fallback (no dependencies)
     GENERADOS_DIR.mkdir(parents=True, exist_ok=True)
     safe_title = re.sub(r"[^\w\s-]", "", titulo).strip().replace(" ", "_")[:60]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -18,7 +28,8 @@ def guardar_documento(titulo: str, contenido: str, tipo_documento: str) -> dict:
         "success": True,
         "filename": filename,
         "filepath": str(filepath),
-        "message": f"Documento guardado exitosamente como '{filename}'.",
+        "format": "txt",
+        "message": f"Documento guardado: '{filename}'.",
     }
 
 

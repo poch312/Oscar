@@ -44,6 +44,11 @@ def init_db() -> None:
             chunks INTEGER DEFAULT 0,
             uploaded_at TEXT DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS institutional_memory (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
     """)
     try:
         c.execute("""
@@ -242,6 +247,57 @@ def delete_kb_document(filename: str) -> None:
     conn.execute("DELETE FROM kb_documents WHERE filename = ?", (filename,))
     conn.commit()
     conn.close()
+
+
+# ── Institutional memory ───────────────────────────────────────────────────────
+
+_INSTITUTIONAL_KEYS = [
+    "nombre_institucion", "municipio", "modelo_pedagogico",
+    "metodologia", "grados", "nombre_docente",
+]
+
+
+def get_institutional_context() -> dict:
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT key, value FROM institutional_memory WHERE key IN ({})".format(
+            ",".join("?" * len(_INSTITUTIONAL_KEYS))
+        ),
+        _INSTITUTIONAL_KEYS,
+    ).fetchall()
+    conn.close()
+    return {r[0]: r[1] for r in rows}
+
+
+def set_institutional_context(data: dict) -> None:
+    conn = _connect()
+    for key, value in data.items():
+        if key in _INSTITUTIONAL_KEYS and str(value).strip():
+            conn.execute(
+                "INSERT OR REPLACE INTO institutional_memory (key, value, updated_at) VALUES (?, ?, ?)",
+                (key, str(value).strip(), datetime.now().isoformat()),
+            )
+    conn.commit()
+    conn.close()
+
+
+def build_institutional_prompt(ctx: dict) -> str:
+    if not ctx:
+        return ""
+    lines = ["", "══ CONTEXTO INSTITUCIONAL DEL DOCENTE ══"]
+    labels = {
+        "nombre_docente": "Docente",
+        "nombre_institucion": "Institución",
+        "municipio": "Municipio",
+        "modelo_pedagogico": "Modelo pedagógico",
+        "metodologia": "Metodología",
+        "grados": "Grados a cargo",
+    }
+    for key, label in labels.items():
+        if key in ctx:
+            lines.append(f"{label}: {ctx[key]}")
+    lines.append("Usa esta información en todos los documentos generados.")
+    return "\n".join(lines)
 
 
 def kb_document_exists(filename: str) -> bool:

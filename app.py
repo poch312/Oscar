@@ -95,6 +95,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 #main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
 #header{padding:10px 14px;background:#1a1f2e;border-bottom:1px solid #2d3748;flex-shrink:0;display:flex;align-items:center;gap:10px}
 #menu-btn{background:none;border:none;color:#a0aec0;font-size:22px;cursor:pointer;padding:2px 4px;display:none;flex-shrink:0;line-height:1}
+#cfg-btn{background:none;border:none;color:#a0aec0;font-size:18px;cursor:pointer;padding:2px 4px;flex-shrink:0;line-height:1}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:#1a1f2e;border:1px solid #2d3748;border-radius:12px;padding:20px;width:90%;max-width:440px;max-height:90vh;overflow-y:auto}
+.modal h3{color:#667eea;margin-bottom:14px;font-size:15px}
+.modal label{display:block;font-size:11px;color:#718096;margin-bottom:3px;margin-top:10px}
+.modal input{width:100%;background:#2d3748;border:1px solid #4a5568;border-radius:6px;color:#fafafa;padding:8px 10px;font-size:13px}
+.modal .save-btn{margin-top:16px;background:#667eea;color:#fff;border:none;border-radius:8px;padding:9px 18px;cursor:pointer;font-size:13px;width:100%}
 #htext{flex:1;min-width:0}
 #htext h2{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #htext p{font-size:10px;color:#718096;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -142,7 +150,26 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <button id="menu-btn" onclick="toggleSidebar()">&#9776;</button>
     <div id="htext">
       <h2>OSCAR &mdash; Agente Docente</h2>
-      <p>Especialista en educacion colombiana &middot; Matematicas &middot; STEM</p>
+      <p id="provider-label">Especialista en educacion colombiana &middot; Matematicas &middot; STEM</p>
+    </div>
+    <button id="cfg-btn" onclick="openCfg()" title="Configurar institucion">&#9881;</button>
+  </div>
+  <div class="modal-overlay" id="cfg-modal" onclick="closeCfgOutside(event)">
+    <div class="modal">
+      <h3>&#127eb; Contexto Institucional</h3>
+      <label>Nombre del docente</label>
+      <input id="cf-docente" placeholder="Prof. Juan Perez">
+      <label>Institucion educativa</label>
+      <input id="cf-inst" placeholder="IE Nombre del Colegio">
+      <label>Municipio</label>
+      <input id="cf-municipio" placeholder="Ciudad, Departamento">
+      <label>Modelo pedagogico</label>
+      <input id="cf-modelo" placeholder="Constructivista, ABP, etc.">
+      <label>Metodologia principal</label>
+      <input id="cf-met" placeholder="ABP, Aula invertida, Maker...">
+      <label>Grados a cargo</label>
+      <input id="cf-grados" placeholder="8, 9, 10, 11">
+      <button class="save-btn" onclick="saveCfg()">Guardar configuracion</button>
     </div>
   </div>
   <div id="api-warn"></div>
@@ -165,6 +192,36 @@ function toggleSidebar() {
 function closeSidebar() {
   document.getElementById('sidebar').classList.remove('open');
   document.getElementById('overlay').classList.remove('open');
+}
+
+async function openCfg(){
+  const ctx=await fetch('/api/institutional').then(r=>r.json());
+  document.getElementById('cf-docente').value=ctx.nombre_docente||'';
+  document.getElementById('cf-inst').value=ctx.nombre_institucion||'';
+  document.getElementById('cf-municipio').value=ctx.municipio||'';
+  document.getElementById('cf-modelo').value=ctx.modelo_pedagogico||'';
+  document.getElementById('cf-met').value=ctx.metodologia||'';
+  document.getElementById('cf-grados').value=ctx.grados||'';
+  document.getElementById('cfg-modal').classList.add('open');
+}
+function closeCfgOutside(e){
+  if(e.target===document.getElementById('cfg-modal'))
+    document.getElementById('cfg-modal').classList.remove('open');
+}
+async function saveCfg(){
+  await fetch('/api/institutional',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      nombre_docente:document.getElementById('cf-docente').value,
+      nombre_institucion:document.getElementById('cf-inst').value,
+      municipio:document.getElementById('cf-municipio').value,
+      modelo_pedagogico:document.getElementById('cf-modelo').value,
+      metodologia:document.getElementById('cf-met').value,
+      grados:document.getElementById('cf-grados').value,
+    })
+  });
+  document.getElementById('cfg-modal').classList.remove('open');
 }
 
 async function loadKB(){
@@ -211,6 +268,8 @@ async function init() {
     w.style.display='block';
     w.textContent='Configura GROQ_API_KEY en el archivo .env y reinicia el servidor.';
   }
+  document.getElementById('provider-label').textContent =
+    'Proveedor: ' + (cfg.provider||'groq').toUpperCase() + ' · ' + (cfg.model||'');
   const sessions = await fetch('/api/sessions').then(r=>r.json());
   if (sessions.length > 0) { renderSessions(sessions); await switchSession(sessions[0].id); }
   else await newSession();
@@ -393,7 +452,25 @@ def index():
 
 @app.route("/api/config")
 def config():
-    return jsonify({"api_key_set": bool(os.getenv("GROQ_API_KEY"))})
+    from config import Config
+    key_set = bool(Config.GROQ_API_KEY) if Config.PROVIDER == "groq" else True
+    return jsonify({
+        "api_key_set": key_set,
+        "provider": Config.PROVIDER,
+        "model": Config.GROQ_MODEL if Config.PROVIDER == "groq" else Config.OLLAMA_MODEL,
+    })
+
+
+@app.route("/api/institutional", methods=["GET"])
+def get_institutional():
+    return jsonify(memory.get_institutional_context())
+
+
+@app.route("/api/institutional", methods=["POST"])
+def set_institutional():
+    data = request.get_json() or {}
+    memory.set_institutional_context(data)
+    return jsonify({"ok": True})
 
 
 @app.route("/api/sessions", methods=["GET"])
