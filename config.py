@@ -20,7 +20,7 @@ class Config:
 
     # ── Generation ────────────────────────────────────────────────────────────
     MAX_TOKENS = int(os.getenv("MAX_TOKENS", "4096"))
-    MAX_HISTORY_CHARS = int(os.getenv("MAX_HISTORY_CHARS", "25000"))
+    MAX_HISTORY_CHARS = int(os.getenv("MAX_HISTORY_CHARS", "8000"))
 
     # ── App ───────────────────────────────────────────────────────────────────
     PORT = int(os.getenv("PORT", 5000))
