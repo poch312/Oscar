@@ -1,14 +1,19 @@
 """
 LLM provider abstraction — supports Groq (cloud) and Ollama (local).
-Both expose OpenAI-compatible endpoints, so the implementation is shared.
+Both expose OpenAI-compatible endpoints so the implementation is shared.
+Auto-trims payload to stay within provider byte limits.
 """
 import sys
+import json
 import time
 import requests
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import Config
+
+# Safe payload ceiling in bytes. Groq's free tier rejects requests above ~32KB.
+_MAX_PAYLOAD_BYTES = 24_000
 
 
 class LLMProvider:
@@ -27,7 +32,9 @@ class LLMProvider:
             self.provider_name = f"Groq ({self.model})"
 
     def complete(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
-        """Single chat completion. Returns the message dict from the response."""
+        """Single chat completion. Auto-trims history if payload exceeds size limit."""
+        messages = self._fit_payload(messages, tools)
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -65,3 +72,27 @@ class LLMProvider:
             raise ValueError(f"Respuesta inesperada del proveedor: {data}")
 
         return data["choices"][0]["message"]
+
+    def _fit_payload(self, messages: list[dict], tools: list[dict] | None) -> list[dict]:
+        """Remove oldest non-system messages until payload fits within byte limit."""
+        while True:
+            payload = {"model": self.model, "messages": messages, "max_tokens": Config.MAX_TOKENS}
+            if tools:
+                payload["tools"] = tools
+                payload["tool_choice"] = "auto"
+
+            size = len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+            if size <= _MAX_PAYLOAD_BYTES:
+                break
+
+            # Find oldest removable message (not system, not the last user message)
+            removable = [i for i, m in enumerate(messages) if m["role"] != "system"]
+            if len(removable) > 1:
+                messages = [m for i, m in enumerate(messages) if i != removable[0]]
+            else:
+                # Can't trim further — truncate system prompt as last resort
+                sys_msg = messages[0]["content"]
+                messages[0] = {**messages[0], "content": sys_msg[: len(sys_msg) // 2]}
+                break
+
+        return messages

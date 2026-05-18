@@ -176,7 +176,7 @@ class OscarAgent:
             flat.append({"role": api_role, "content": text})
 
         # Trim to avoid unbounded context growth
-        MAX_CHARS = getattr(__import__("config", fromlist=["Config"]).Config, "MAX_HISTORY_CHARS", 8_000)
+        MAX_CHARS = 5_000
         trimmed: list[dict] = []
         used = 0
         for msg in reversed(flat):
