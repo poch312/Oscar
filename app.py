@@ -53,22 +53,25 @@ def _job_worker(job_id: str, session_id: str, message: str):
             _jobs[job_id]["error"] = str(e)
 
 
-def _extract_text(file_bytes: bytes, filename: str, max_chars: int = 80_000) -> str:
+def _extract_text(file_bytes: bytes, filename: str, max_chars: int = 80_000) -> str | None:
+    """Extract text from PDF. Returns None if no extractor is available."""
     try:
         import fitz
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         text = "\n\n".join(p.get_text() for p in doc)
         doc.close()
-        return text[:max_chars]
+        return text[:max_chars] if text.strip() else None
     except ImportError:
         pass
     try:
         from pdfminer.high_level import extract_text as pdfminer_extract
         import io
         text = pdfminer_extract(io.BytesIO(file_bytes)) or ""
-        return text[:max_chars]
-    except Exception as e:
-        return f"[No se pudo extraer texto de '{filename}': {e}]"
+        return text[:max_chars] if text.strip() else None
+    except ImportError:
+        return None
+    except Exception:
+        return None
 
 
 HTML = r"""<!DOCTYPE html>
@@ -115,6 +118,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .msg.assistant{background:#1a1f2e;color:#e2e8f0;align-self:flex-start;border:1px solid #2d3748;border-bottom-left-radius:3px}
 .msg.thinking{color:#718096;font-style:italic}
 .dl-btn{display:inline-block;margin-top:8px;padding:6px 12px;background:#38a169;color:#fff;border-radius:6px;font-size:12px;text-decoration:none}
+.msg.assistant h1,.msg.assistant h2{color:#a5b4fc;margin:10px 0 4px;font-size:15px;font-weight:700}
+.msg.assistant h3{color:#c4b5fd;margin:8px 0 3px;font-size:14px;font-weight:600}
+.msg.assistant h4{color:#d1d5db;margin:6px 0 2px;font-size:13px;font-weight:600}
+.msg.assistant p{margin:4px 0}
+.msg.assistant ul,.msg.assistant ol{padding-left:18px;margin:4px 0}
+.msg.assistant li{margin:2px 0}
+.msg.assistant table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12px}
+.msg.assistant th{background:#2d3748;border:1px solid #4a5568;padding:5px 8px;text-align:left;font-weight:700}
+.msg.assistant td{border:1px solid #4a5568;padding:4px 8px}
+.msg.assistant code{background:#2d3748;padding:1px 5px;border-radius:3px;font-size:12px;font-family:monospace}
+.msg.assistant hr{border:none;border-top:1px solid #4a5568;margin:8px 0}
+.msg.assistant strong{color:#fbbf24}
+.msg.assistant em{color:#86efac}
 #input-area{padding:10px 12px;background:#1a1f2e;border-top:1px solid #2d3748;display:flex;gap:8px;align-items:flex-end;flex-shrink:0}
 #user-input{flex:1;background:#2d3748;border:1px solid #4a5568;border-radius:10px;color:#fafafa;padding:10px 13px;font-size:15px;resize:none;max-height:120px;min-height:46px;font-family:inherit;min-width:0}
 #user-input:focus{outline:none;border-color:#667eea}
@@ -186,6 +202,67 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 <script>
 let sid = null;
 let _currentPollTimer = null;
+
+function _esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function _inline(s){
+  s=_esc(s);
+  s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+  s=s.replace(/\*([^*]+)\*/g,'<em>$1</em>');
+  s=s.replace(/`([^`]+)`/g,'<code>$1</code>');
+  return s;
+}
+function mdToHtml(md){
+  const lines=md.split('\n');
+  let html='',inUl=false,inOl=false,inTable=false,firstRow=true;
+  function closeAll(){
+    if(inUl){html+='</ul>';inUl=false;}
+    if(inOl){html+='</ol>';inOl=false;}
+    if(inTable){html+='</table>';inTable=false;}
+  }
+  for(const line of lines){
+    const s=line.trim();
+    if(!s){closeAll();html+='<br>';continue;}
+    // Tables
+    if(s.startsWith('|')){
+      if(/^\|[-:\s|]+\|$/.test(s)){firstRow=false;continue;}
+      if(!inTable){if(inUl){html+='</ul>';inUl=false;}if(inOl){html+='</ol>';inOl=false;}html+='<table>';inTable=true;firstRow=true;}
+      const cells=s.replace(/^\||\|$/g,'').split('|').map(c=>c.trim());
+      const tag=firstRow?'th':'td';
+      html+='<tr>'+cells.map(c=>`<${tag}>${_inline(c)}</${tag}>`).join('')+'</tr>';
+      firstRow=false;continue;
+    }
+    if(inTable){html+='</table>';inTable=false;}
+    // Headings
+    if(s.startsWith('#### ')){closeAll();html+=`<h4>${_inline(s.slice(5))}</h4>`;continue;}
+    if(s.startsWith('### ')){closeAll();html+=`<h3>${_inline(s.slice(4))}</h3>`;continue;}
+    if(s.startsWith('## ')){closeAll();html+=`<h2>${_inline(s.slice(3))}</h2>`;continue;}
+    if(s.startsWith('# ')){closeAll();html+=`<h1>${_inline(s.slice(2))}</h1>`;continue;}
+    if(/^[-*_]{3,}$/.test(s)){closeAll();html+='<hr>';continue;}
+    // Nested bullet
+    if(/^[ \t]{2,}[-*]\s/.test(line)){
+      if(inOl){html+='</ol>';inOl=false;}
+      if(!inUl){html+='<ul>';inUl=true;}
+      html+=`<li style="margin-left:14px">${_inline(line.replace(/^[ \t]+[-*]\s+/,''))}</li>`;continue;
+    }
+    // Bullet
+    if(s.startsWith('- ')||s.startsWith('* ')){
+      if(inOl){html+='</ol>';inOl=false;}
+      if(!inUl){html+='<ul>';inUl=true;}
+      html+=`<li>${_inline(s.slice(2))}</li>`;continue;
+    }
+    // Numbered
+    const nm=s.match(/^(\d+)\.\s+(.+)$/);
+    if(nm){
+      if(inUl){html+='</ul>';inUl=false;}
+      if(!inOl){html+='<ol>';inOl=true;}
+      html+=`<li>${_inline(nm[2])}</li>`;continue;
+    }
+    closeAll();
+    html+=`<p>${_inline(s)}</p>`;
+  }
+  closeAll();
+  return html;
+}
 
 function toggleSidebar() {
   document.getElementById('sidebar').classList.toggle('open');
@@ -325,7 +402,8 @@ function addMsg(role,text,downloads=[],kbCount=0){
   const c=document.getElementById('messages');
   const d=document.createElement('div');
   d.className='msg '+role;
-  d.textContent=text;
+  if(role==='assistant'){d.innerHTML=mdToHtml(text);}
+  else{d.textContent=text;}
   if(kbCount>0){
     const kb=document.createElement('div');
     kb.style.cssText='font-size:10px;color:#4a9568;margin-top:6px;padding-top:5px;border-top:1px solid #2d3748';
@@ -571,9 +649,11 @@ def upload():
 
     file_bytes = file.read()
     if filename.lower().endswith(".pdf"):
-        text = _extract_text(file_bytes, filename)
+        text = _extract_text(file_bytes, filename, max_chars=80_000)
+        if text is None:
+            return jsonify({"error": "No se pudo leer el PDF. Ejecuta: pip install pdfminer.six y reinicia el servidor."}), 400
     else:
-        text = file_bytes.decode("utf-8", errors="replace")[:40_000]
+        text = file_bytes.decode("utf-8", errors="replace")[:80_000]
 
     memory.add_document(sid, filename, text)
     context_msg = (
@@ -603,6 +683,8 @@ def upload_kb():
     file_bytes = file.read()
     if filename.lower().endswith(".pdf"):
         text = _extract_text(file_bytes, filename, max_chars=200_000)
+        if text is None:
+            return jsonify({"error": "No se pudo leer el PDF. Ejecuta: pip install pdfminer.six y reinicia el servidor."}), 400
     else:
         text = file_bytes.decode("utf-8", errors="replace")[:400_000]
     try:
