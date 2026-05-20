@@ -174,12 +174,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   <div id="session-list"></div>
   <hr class="divider">
   <div class="lbl">Base de Conocimiento</div>
-  <input type="file" id="kb-file-input" accept=".pdf,.txt,.docx,.xlsx,.pptx" style="display:none" onchange="uploadToKB()">
+  <input type="file" id="kb-file-input" accept=".pdf,.txt,.docx,.xlsx,.pptx,.html,.csv" style="display:none" onchange="uploadToKB()">
   <label for="kb-file-input" style="cursor:pointer;color:#667eea;font-size:11px;display:block;padding:5px 8px;border-radius:6px;border:1px dashed #4a5568;text-align:center;margin-bottom:4px">+ Agregar documento permanente</label>
   <div id="kb-list"></div>
   <hr class="divider">
   <div class="lbl">Documentos de sesion</div>
-  <input type="file" id="file-input" accept=".pdf,.txt,.docx,.xlsx,.pptx" style="display:none" onchange="uploadFile()">
+  <input type="file" id="file-input" accept=".pdf,.txt,.docx,.xlsx,.pptx,.html,.csv" style="display:none" onchange="uploadFile()">
   <div id="docs-list"></div>
 </div>
 <div id="main">
@@ -667,7 +667,7 @@ def upload():
         return jsonify({"ok": True, "response": f"'{filename}' ya estaba cargado."})
 
     file_bytes = file.read()
-    _binary_exts = {".pdf", ".docx", ".xlsx", ".pptx"}
+    _binary_exts = {".pdf", ".docx", ".xlsx", ".pptx", ".html", ".csv"}
     ext = os.path.splitext(filename)[1].lower()
     if ext in _binary_exts:
         text = _extract_text(file_bytes, filename, max_chars=80_000)
@@ -706,7 +706,7 @@ def upload_kb():
         return jsonify({"error": "No se recibió archivo"}), 400
     filename = file.filename
     file_bytes = file.read()
-    _binary_exts = {".pdf", ".docx", ".xlsx", ".pptx"}
+    _binary_exts = {".pdf", ".docx", ".xlsx", ".pptx", ".html", ".csv"}
     ext = os.path.splitext(filename)[1].lower()
     if ext in _binary_exts:
         text = _extract_text(file_bytes, filename, max_chars=200_000)
