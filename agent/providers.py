@@ -50,10 +50,15 @@ class LLMProvider:
 
         url = f"{self.base_url}/chat/completions"
 
+        # Ollama on CPU can take several minutes for long responses
+        timeout = 600 if Config.PROVIDER == "ollama" else 90
+
         for attempt in range(4):
             try:
-                resp = requests.post(url, headers=headers, json=payload, timeout=90)
+                resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
             except requests.exceptions.Timeout:
+                if Config.PROVIDER == "ollama":
+                    raise ValueError("El modelo local tardó demasiado. Intenta con una pregunta más corta o usa qwen2.5:3b.")
                 raise ValueError("Tiempo de espera agotado. La red es lenta — intenta de nuevo.")
 
             if resp.status_code == 429:

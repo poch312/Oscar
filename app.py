@@ -29,9 +29,11 @@ def _cleanup_jobs():
 
 
 def _job_worker(job_id: str, session_id: str, message: str):
+    from config import Config
+    provider_label = "modelo local (puede tardar 2-5 min)" if Config.PROVIDER == "ollama" else "Groq"
     with _jobs_lock:
         _jobs[job_id]["status"] = "running"
-        _jobs[job_id]["progress"] = "Consultando Groq..."
+        _jobs[job_id]["progress"] = f"Consultando {provider_label}..."
     try:
         msgs = memory.get_messages(session_id)
         if not any(m["role"] == "user" for m in msgs):
@@ -373,11 +375,11 @@ async function sendMessage(){
 }
 
 function _pollJob(job_id,thinkingEl,btn,startTime,errCount){
-  const POLL=2000,MAX_WAIT=180000,MAX_ERR=5;
+  const POLL=2000,MAX_WAIT=660000,MAX_ERR=5;
   _currentPollTimer=setTimeout(async()=>{
     if(Date.now()-startTime>MAX_WAIT){
       thinkingEl.remove();
-      addMsg('assistant','Tiempo de espera agotado (3 min). Intenta de nuevo.');
+      addMsg('assistant','Tiempo de espera agotado (11 min). El modelo local es muy lento para esta consulta — intenta una pregunta más corta.');
       btn.disabled=false; return;
     }
     try{
