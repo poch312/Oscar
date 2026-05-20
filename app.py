@@ -53,20 +53,20 @@ def _job_worker(job_id: str, session_id: str, message: str):
             _jobs[job_id]["error"] = str(e)
 
 
-def _extract_text(file_bytes: bytes, filename: str) -> str:
+def _extract_text(file_bytes: bytes, filename: str, max_chars: int = 80_000) -> str:
     try:
         import fitz
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         text = "\n\n".join(p.get_text() for p in doc)
         doc.close()
-        return text[:40_000]
+        return text[:max_chars]
     except ImportError:
         pass
     try:
         from pdfminer.high_level import extract_text as pdfminer_extract
         import io
         text = pdfminer_extract(io.BytesIO(file_bytes)) or ""
-        return text[:40_000]
+        return text[:max_chars]
     except Exception as e:
         return f"[No se pudo extraer texto de '{filename}': {e}]"
 
@@ -602,9 +602,9 @@ def upload_kb():
     filename = file.filename
     file_bytes = file.read()
     if filename.lower().endswith(".pdf"):
-        text = _extract_text(file_bytes, filename)
+        text = _extract_text(file_bytes, filename, max_chars=200_000)
     else:
-        text = file_bytes.decode("utf-8", errors="replace")[:200_000]
+        text = file_bytes.decode("utf-8", errors="replace")[:400_000]
     try:
         from rag.indexer import index_document
         info = index_document(filename, text)

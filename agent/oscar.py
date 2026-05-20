@@ -11,7 +11,7 @@ Architecture:
 """
 import json
 
-from .prompts import SYSTEM_PROMPT
+from .prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_LOCAL
 from .specialized_prompts import AGENT_PROMPTS
 from .supervisor import detect_intent
 from .providers import LLMProvider
@@ -123,16 +123,20 @@ class OscarAgent:
             return []
         try:
             from rag.retriever import search as rag_search
-            results = rag_search(query, limit=3)
+            results = rag_search(query, limit=5)
         except Exception:
-            results = memory.search_kb(query, limit=3)
+            results = memory.search_kb(query, limit=5)
         return results or []
 
     def _build_messages(self, history: list[dict], intent: str, kb_results: list[dict] = None) -> list[dict]:
-        # Compose system prompt: base + specialized agent extension + institutional context
+        from config import Config
+        # Use compact prompt for small local models; full prompt for cloud/large models
+        is_local_small = Config.PROVIDER == "ollama" and "3b" in Config.OLLAMA_MODEL.lower()
+        base_prompt = SYSTEM_PROMPT_LOCAL if is_local_small else SYSTEM_PROMPT
+
         ctx = memory.get_institutional_context()
         system_content = (
-            SYSTEM_PROMPT
+            base_prompt
             + AGENT_PROMPTS.get(intent, "")
             + memory.build_institutional_prompt(ctx)
         )
@@ -169,8 +173,10 @@ class OscarAgent:
             api_role = "user" if role == "system" else role
             flat.append({"role": api_role, "content": text})
 
-        # Trim to avoid unbounded context growth
-        MAX_CHARS = 5_000
+        # Ollama is local — no payload cost, use generous context window
+        # Groq cloud has 24KB limit — keep trimmed
+        from config import Config
+        MAX_CHARS = 20_000 if Config.PROVIDER == "ollama" else 5_000
         trimmed: list[dict] = []
         used = 0
         for msg in reversed(flat):

@@ -3,6 +3,7 @@ Embedding via Ollama local API.
 Pull the model once: ollama pull nomic-embed-text
 """
 import sys
+import time
 import requests
 from pathlib import Path
 
@@ -11,6 +12,11 @@ from config import Config
 
 _OLLAMA_HOST = Config.OLLAMA_BASE_URL.replace("/v1", "")
 _MODEL = Config.EMBED_MODEL
+
+# Cache availability to avoid an HTTP round-trip on every query
+_available: bool | None = None
+_checked_at: float = 0.0
+_CACHE_TTL = 300  # re-check every 5 minutes
 
 
 def get_embedding(text: str) -> list[float] | None:
@@ -28,4 +34,10 @@ def get_embedding(text: str) -> list[float] | None:
 
 
 def is_available() -> bool:
-    return get_embedding("test") is not None
+    global _available, _checked_at
+    now = time.monotonic()
+    if _available is not None and now - _checked_at < _CACHE_TTL:
+        return _available
+    _available = get_embedding("test") is not None
+    _checked_at = now
+    return _available

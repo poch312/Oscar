@@ -170,32 +170,54 @@ def document_exists(session_id: str, filename: str) -> bool:
 
 # ── Knowledge base helpers ─────────────────────────────────────────────────────
 
-def _chunk_text(text: str, size: int = 800) -> list[str]:
-    """Split text into chunks on paragraph boundaries."""
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+def _chunk_text(text: str, size: int = 1500, overlap: int = 200) -> list[str]:
+    """
+    Split text into overlapping chunks at section/paragraph boundaries.
+    Overlap prevents context loss at chunk edges.
+    """
+    # Split at section headers and article numbers first
+    section_re = re.compile(
+        r"(?=\n(?:#{1,4} |\s*(?:Artículo|ARTÍCULO|Art\.)\s+\d+|\d+\.\s+[A-ZÁÉÍÓÚ]))",
+        re.IGNORECASE,
+    )
+    sections = [s.strip() for s in section_re.split(text) if s.strip()]
+    if not sections:
+        sections = [text]
+
+    paragraphs: list[str] = []
+    for section in sections:
+        paragraphs.extend(p.strip() for p in section.split("\n\n") if p.strip())
+
     chunks: list[str] = []
     current = ""
+
     for para in paragraphs:
-        if len(current) + len(para) + 2 <= size:
-            current = (current + "\n\n" + para).strip() if current else para
+        probe = (current + "\n\n" + para).strip() if current else para
+        if len(probe) <= size:
+            current = probe
         else:
             if current:
                 chunks.append(current)
-            if len(para) > size:
-                for i in range(0, len(para), size):
+                tail = current[-overlap:] if len(current) > overlap else current
+                current = (tail + "\n\n" + para).strip() if len(tail) + len(para) + 2 <= size else para
+            else:
+                # Paragraph alone exceeds size — force split with overlap
+                for i in range(0, len(para), size - overlap):
                     chunks.append(para[i : i + size])
                 current = ""
-            else:
-                current = para
+
     if current:
         chunks.append(current)
+
     return chunks or [text[:size]]
 
 
 def _fts_query(query: str) -> str:
-    """Sanitize query for FTS5: extract word tokens."""
-    terms = re.findall(r"[\wÀ-ɏ]+", query)
-    return " ".join(f'"{t}"' for t in terms) if terms else '""'
+    """Build FTS5 query with OR logic for maximum recall."""
+    terms = re.findall(r"[\wÀ-ɏ]{3,}", query)  # min 3 chars reduces noise
+    if not terms:
+        return '""'
+    return " OR ".join(f'"{t}"' for t in terms[:10])
 
 
 def add_kb_document(filename: str, text: str) -> int:

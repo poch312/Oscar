@@ -12,8 +12,22 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import Config
 
-# Safe payload ceiling in bytes. Groq's free tier rejects requests above ~32KB.
-_MAX_PAYLOAD_BYTES = 24_000
+# Groq free tier rejects payloads above ~32KB. Ollama has no such limit (local).
+_GROQ_MAX_PAYLOAD_BYTES = 24_000
+
+
+def _model_max_tokens() -> int:
+    """Return appropriate max_tokens based on model size."""
+    base = Config.MAX_TOKENS
+    if Config.PROVIDER == "ollama":
+        model = Config.OLLAMA_MODEL.lower()
+        if "3b" in model:
+            return min(base, 2048)
+        if "7b" in model:
+            return min(base, 4096)
+        if "14b" in model or "32b" in model:
+            return min(base, 8192)
+    return base
 
 
 class LLMProvider:
@@ -32,25 +46,24 @@ class LLMProvider:
             self.provider_name = f"Groq ({self.model})"
 
     def complete(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
-        """Single chat completion. Auto-trims history if payload exceeds size limit."""
+        """Single chat completion. Trims history for Groq (payload limit); Ollama passes full context."""
         messages = self._fit_payload(messages, tools)
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
+        max_tok = _model_max_tokens()
         payload: dict = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": Config.MAX_TOKENS,
+            "max_tokens": max_tok,
         }
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
 
         url = f"{self.base_url}/chat/completions"
-
-        # Ollama on CPU can take several minutes for long responses
         timeout = 600 if Config.PROVIDER == "ollama" else 90
 
         for attempt in range(4):
@@ -58,7 +71,7 @@ class LLMProvider:
                 resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
             except requests.exceptions.Timeout:
                 if Config.PROVIDER == "ollama":
-                    raise ValueError("El modelo local tardó demasiado. Intenta con una pregunta más corta o usa qwen2.5:3b.")
+                    raise ValueError("El modelo local tardó demasiado. Intenta con una pregunta más corta.")
                 raise ValueError("Tiempo de espera agotado. La red es lenta — intenta de nuevo.")
 
             if resp.status_code == 429:
@@ -79,7 +92,10 @@ class LLMProvider:
         return data["choices"][0]["message"]
 
     def _fit_payload(self, messages: list[dict], tools: list[dict] | None) -> list[dict]:
-        """Remove oldest non-system messages until payload fits within byte limit."""
+        """Trim oldest messages until payload fits. Only enforced for Groq (cloud limit)."""
+        if Config.PROVIDER == "ollama":
+            return messages  # No byte limit for local inference
+
         while True:
             payload = {"model": self.model, "messages": messages, "max_tokens": Config.MAX_TOKENS}
             if tools:
@@ -87,15 +103,13 @@ class LLMProvider:
                 payload["tool_choice"] = "auto"
 
             size = len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
-            if size <= _MAX_PAYLOAD_BYTES:
+            if size <= _GROQ_MAX_PAYLOAD_BYTES:
                 break
 
-            # Find oldest removable message (not system, not the last user message)
             removable = [i for i, m in enumerate(messages) if m["role"] != "system"]
             if len(removable) > 1:
                 messages = [m for i, m in enumerate(messages) if i != removable[0]]
             else:
-                # Can't trim further — truncate system prompt as last resort
                 sys_msg = messages[0]["content"]
                 messages[0] = {**messages[0], "content": sys_msg[: len(sys_msg) // 2]}
                 break

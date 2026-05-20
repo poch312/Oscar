@@ -132,7 +132,11 @@ def markdown_to_docx(titulo: str, contenido: str, tipo: str, institucion: str = 
             i += 1
             continue
 
-        # Headings
+        # Headings (h4 first to avoid prefix collision with h3 etc.)
+        if stripped.startswith("#### "):
+            p = doc.add_heading(stripped[5:], 4)
+            i += 1
+            continue
         if stripped.startswith("### "):
             doc.add_heading(stripped[4:], 3)
             i += 1
@@ -158,10 +162,25 @@ def markdown_to_docx(titulo: str, contenido: str, tipo: str, institucion: str = 
             i += consumed if consumed else 1
             continue
 
-        # Bullet list
+        # Nested bullet (2+ spaces or tab before - / *)
+        if re.match(r"^[ \t]{2,}[-*]\s", line):
+            para = doc.add_paragraph(style="List Bullet 2")
+            _apply_inline(para, re.sub(r"^[ \t]+[-*]\s+", "", line))
+            i += 1
+            continue
+
+        # Top-level bullet list
         if stripped.startswith("- ") or stripped.startswith("* "):
             para = doc.add_paragraph(style="List Bullet")
             _apply_inline(para, stripped[2:])
+            i += 1
+            continue
+
+        # Nested numbered list
+        nested_num = re.match(r"^[ \t]{2,}(\d+)\.\s+(.+)$", line)
+        if nested_num:
+            para = doc.add_paragraph(style="List Number 2")
+            _apply_inline(para, nested_num.group(2))
             i += 1
             continue
 
