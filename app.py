@@ -54,24 +54,43 @@ def _job_worker(job_id: str, session_id: str, message: str):
 
 
 def _extract_text(file_bytes: bytes, filename: str, max_chars: int = 80_000) -> str | None:
-    """Extract text from PDF. Returns None if no extractor is available."""
+    """
+    Extract text from PDF/DOCX/XLSX/PPTX/TXT.
+    Priority: markitdown (preserves Markdown structure) → pdfminer (plain text).
+    Returns None if no extractor is available.
+    """
+    import os, tempfile
+    ext = os.path.splitext(filename)[1].lower()
+
+    # 1. markitdown — best output: headings, tables and lists preserved as Markdown
     try:
-        import fitz
-        doc = fitz.open(stream=file_bytes, filetype="pdf")
-        text = "\n\n".join(p.get_text() for p in doc)
-        doc.close()
-        return text[:max_chars] if text.strip() else None
+        from markitdown import MarkItDown
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
+        try:
+            result = MarkItDown().convert(tmp_path)
+            text = result.text_content or ""
+        finally:
+            os.unlink(tmp_path)
+        if text.strip():
+            return text[:max_chars]
     except ImportError:
         pass
-    try:
-        from pdfminer.high_level import extract_text as pdfminer_extract
-        import io
-        text = pdfminer_extract(io.BytesIO(file_bytes)) or ""
-        return text[:max_chars] if text.strip() else None
-    except ImportError:
-        return None
     except Exception:
-        return None
+        pass
+
+    # 2. pdfminer fallback (PDFs only)
+    if ext == ".pdf":
+        try:
+            from pdfminer.high_level import extract_text as pdfminer_extract
+            import io
+            text = pdfminer_extract(io.BytesIO(file_bytes)) or ""
+            return text[:max_chars] if text.strip() else None
+        except Exception:
+            return None
+
+    return None
 
 
 HTML = r"""<!DOCTYPE html>
@@ -155,12 +174,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   <div id="session-list"></div>
   <hr class="divider">
   <div class="lbl">Base de Conocimiento</div>
-  <input type="file" id="kb-file-input" accept=".pdf,.txt" style="display:none" onchange="uploadToKB()">
+  <input type="file" id="kb-file-input" accept=".pdf,.txt,.docx,.xlsx,.pptx" style="display:none" onchange="uploadToKB()">
   <label for="kb-file-input" style="cursor:pointer;color:#667eea;font-size:11px;display:block;padding:5px 8px;border-radius:6px;border:1px dashed #4a5568;text-align:center;margin-bottom:4px">+ Agregar documento permanente</label>
   <div id="kb-list"></div>
   <hr class="divider">
   <div class="lbl">Documentos de sesion</div>
-  <input type="file" id="file-input" accept=".pdf,.txt" style="display:none" onchange="uploadFile()">
+  <input type="file" id="file-input" accept=".pdf,.txt,.docx,.xlsx,.pptx" style="display:none" onchange="uploadFile()">
   <div id="docs-list"></div>
 </div>
 <div id="main">
@@ -648,10 +667,12 @@ def upload():
         return jsonify({"ok": True, "response": f"'{filename}' ya estaba cargado."})
 
     file_bytes = file.read()
-    if filename.lower().endswith(".pdf"):
+    _binary_exts = {".pdf", ".docx", ".xlsx", ".pptx"}
+    ext = os.path.splitext(filename)[1].lower()
+    if ext in _binary_exts:
         text = _extract_text(file_bytes, filename, max_chars=80_000)
         if text is None:
-            return jsonify({"error": "No se pudo leer el PDF. Ejecuta: pip install pdfminer.six y reinicia el servidor."}), 400
+            return jsonify({"error": f"No se pudo leer '{filename}'. Ejecuta: pip install markitdown[all] y reinicia."}), 400
     else:
         text = file_bytes.decode("utf-8", errors="replace")[:80_000]
 
@@ -685,10 +706,12 @@ def upload_kb():
         return jsonify({"error": "No se recibió archivo"}), 400
     filename = file.filename
     file_bytes = file.read()
-    if filename.lower().endswith(".pdf"):
+    _binary_exts = {".pdf", ".docx", ".xlsx", ".pptx"}
+    ext = os.path.splitext(filename)[1].lower()
+    if ext in _binary_exts:
         text = _extract_text(file_bytes, filename, max_chars=200_000)
         if text is None:
-            return jsonify({"error": "No se pudo leer el PDF. Ejecuta: pip install pdfminer.six y reinicia el servidor."}), 400
+            return jsonify({"error": f"No se pudo leer '{filename}'. Ejecuta: pip install markitdown[all] y reinicia."}), 400
     else:
         text = file_bytes.decode("utf-8", errors="replace")[:400_000]
     try:
