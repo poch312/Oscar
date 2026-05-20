@@ -119,14 +119,30 @@ class OscarAgent:
         return self._run(messages, saved_files)
 
     def _search_kb(self, query: str, intent: str) -> list[dict]:
-        if intent == "general":
-            return []
-        try:
-            from rag.retriever import search as rag_search
-            results = rag_search(query, limit=5)
-        except Exception:
-            results = memory.search_kb(query, limit=5)
-        return results or []
+        results: list[dict] = []
+        seen: set[str] = set()
+
+        def _add(r: dict) -> None:
+            key = r["content"][:80]
+            if key not in seen:
+                seen.add(key)
+                results.append(r)
+
+        # 1. Global KB (all intents except pure general chat)
+        if intent != "general":
+            try:
+                from rag.retriever import search as rag_search
+                for r in rag_search(query, limit=5):
+                    _add(r)
+            except Exception:
+                for r in memory.search_kb(query, limit=5):
+                    _add(r)
+
+        # 2. Session documents — always searched so uploads are usable immediately
+        for r in memory.search_session_docs(self.session_id, query, limit=3):
+            _add(r)
+
+        return results
 
     def _build_messages(self, history: list[dict], intent: str, kb_results: list[dict] = None) -> list[dict]:
         from config import Config

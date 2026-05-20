@@ -656,10 +656,14 @@ def upload():
         text = file_bytes.decode("utf-8", errors="replace")[:80_000]
 
     memory.add_document(sid, filename, text)
+    # Send a 12K preview — enough for structural analysis without overflowing history
+    preview = text[:12_000]
+    suffix = f"\n\n[El documento tiene {len(text):,} caracteres en total. El resto está guardado y se buscará automáticamente en futuras consultas.]" if len(text) > 12_000 else ""
     context_msg = (
-        f"El docente ha cargado el documento '{filename}'.\n\n"
-        f"Contenido:\n\n{text}\n\n"
-        "Analiza este documento y confirma que lo procesaste correctamente."
+        f"El docente cargó el archivo '{filename}'. "
+        f"El texto ya está transcrito abajo — tienes acceso completo a él, no necesitas leer ningún archivo externo.\n\n"
+        f"CONTENIDO DEL DOCUMENTO '{filename}':\n\n{preview}{suffix}\n\n"
+        f"Analiza este contenido: describe su estructura, los temas principales que cubre y cómo puedes usarlo para apoyar al docente."
     )
     try:
         agent = OscarAgent(sid)

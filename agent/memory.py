@@ -322,6 +322,37 @@ def build_institutional_prompt(ctx: dict) -> str:
     return "\n".join(lines)
 
 
+def search_session_docs(session_id: str, query: str, limit: int = 2) -> list[dict]:
+    """Search documents uploaded to a specific session using keyword matching."""
+    terms = re.findall(r"[\wÀ-ɏ]{3,}", query)[:8]
+    if not terms:
+        return []
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT filename, content FROM documents WHERE session_id = ? ORDER BY id",
+        (session_id,),
+    ).fetchall()
+    conn.close()
+
+    scored: list[tuple[int, str, str]] = []
+    for filename, content in rows:
+        lower = content.lower()
+        score = sum(1 for t in terms if t.lower() in lower)
+        if score == 0:
+            continue
+        # Extract the most relevant excerpt around the first matching term
+        first = min(
+            (lower.find(t.lower()) for t in terms if t.lower() in lower),
+            default=0,
+        )
+        start = max(0, first - 300)
+        excerpt = content[start : start + 1500]
+        scored.append((score, filename, excerpt))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [{"filename": f, "content": c} for _, f, c in scored[:limit]]
+
+
 def kb_document_exists(filename: str) -> bool:
     conn = _connect()
     row = conn.execute(
