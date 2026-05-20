@@ -68,17 +68,17 @@ class OscarAgent:
     def chat(self, user_message: str) -> tuple[str, list[dict]]:
         memory.add_message(self.session_id, "user", user_message)
         intent = detect_intent(user_message)
-        messages = self._build_messages(memory.get_messages(self.session_id), intent)
-        messages = self._inject_kb(messages, user_message, intent)
+        kb_results = self._search_kb(user_message, intent)
+        messages = self._build_messages(memory.get_messages(self.session_id), intent, kb_results)
         saved_files: list[dict] = []
         text = self._run(messages, saved_files)
         memory.add_message(self.session_id, "assistant", text)
-        return text, saved_files
+        return text, saved_files, len(kb_results)
 
     def process_upload(self, context_msg: str) -> tuple[str, list[dict]]:
         """Inject document context (stored as 'system', hidden in UI)."""
         memory.add_message(self.session_id, "system", context_msg)
-        messages = self._build_messages(memory.get_messages(self.session_id), "general")
+        messages = self._build_messages(memory.get_messages(self.session_id), "general", [])
         saved_files: list[dict] = []
         text = self._run(messages, saved_files)
         memory.add_message(self.session_id, "assistant", text)
@@ -118,38 +118,17 @@ class OscarAgent:
         messages = messages + tool_results
         return self._run(messages, saved_files)
 
-    def _inject_kb(self, messages: list[dict], query: str, intent: str) -> list[dict]:
-        """
-        Proactive RAG: search KB (semantic or FTS5) and inject results into
-        the last user message before the LLM sees it.
-        """
+    def _search_kb(self, query: str, intent: str) -> list[dict]:
         if intent == "general":
-            return messages
+            return []
         try:
             from rag.retriever import search as rag_search
             results = rag_search(query, limit=3)
         except Exception:
             results = memory.search_kb(query, limit=3)
-        if not results:
-            return messages
-        block = "\n\n".join(
-            f"[Fuente: {r['filename']}]\n{r['content']}" for r in results
-        )
-        note = (
-            "\n\n[INFORMACIÓN DE TU BASE DE CONOCIMIENTO — úsala como fuente principal]\n"
-            + block
-        )
-        for i in range(len(messages) - 1, -1, -1):
-            if messages[i]["role"] == "user":
-                messages = (
-                    messages[:i]
-                    + [{"role": "user", "content": messages[i]["content"] + note}]
-                    + messages[i + 1 :]
-                )
-                break
-        return messages
+        return results or []
 
-    def _build_messages(self, history: list[dict], intent: str) -> list[dict]:
+    def _build_messages(self, history: list[dict], intent: str, kb_results: list[dict] = None) -> list[dict]:
         # Compose system prompt: base + specialized agent extension + institutional context
         ctx = memory.get_institutional_context()
         system_content = (
@@ -157,6 +136,18 @@ class OscarAgent:
             + AGENT_PROMPTS.get(intent, "")
             + memory.build_institutional_prompt(ctx)
         )
+
+        # Inject KB results into system message (higher priority than user message injection)
+        if kb_results:
+            block = "\n\n".join(
+                f"[Fuente: {r['filename']}]\n{r['content']}" for r in kb_results
+            )
+            system_content += (
+                "\n\n## BASE DE CONOCIMIENTO INSTITUCIONAL\n"
+                "Los siguientes fragmentos provienen de los documentos oficiales cargados por el docente. "
+                "Úsalos como fuente principal y cítalos cuando sea relevante:\n\n"
+                + block
+            )
 
         # Flatten history to plain text messages
         flat: list[dict] = []

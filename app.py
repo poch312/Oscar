@@ -39,10 +39,10 @@ def _job_worker(job_id: str, session_id: str, message: str):
         if not any(m["role"] == "user" for m in msgs):
             memory.update_session_name(session_id, message[:50])
         agent = OscarAgent(session_id)
-        text, saved_files = agent.chat(message)
+        text, saved_files, kb_count = agent.chat(message)
         with _jobs_lock:
             _jobs[job_id]["status"] = "done"
-            _jobs[job_id]["result"] = {"text": text, "saved_files": saved_files}
+            _jobs[job_id]["result"] = {"text": text, "saved_files": saved_files, "kb_count": kb_count}
     except req_lib.exceptions.Timeout:
         with _jobs_lock:
             _jobs[job_id]["status"] = "error"
@@ -321,11 +321,17 @@ function addWelcome(){
   addMsg('assistant','Hola! Soy OSCAR. Estoy aqui para apoyarte con planeaciones, mallas curriculares, guias, rubricas, evaluaciones, proyectos STEM y toda la documentacion docente que necesites. Con que empezamos?');
 }
 
-function addMsg(role,text,downloads=[]){
+function addMsg(role,text,downloads=[],kbCount=0){
   const c=document.getElementById('messages');
   const d=document.createElement('div');
   d.className='msg '+role;
   d.textContent=text;
+  if(kbCount>0){
+    const kb=document.createElement('div');
+    kb.style.cssText='font-size:10px;color:#4a9568;margin-top:6px;padding-top:5px;border-top:1px solid #2d3748';
+    kb.textContent='Fuentes KB: '+kbCount+' fragmentos consultados';
+    d.appendChild(kb);
+  }
   for(const f of downloads){
     const a=document.createElement('a');
     a.href='/api/download/'+f.filename;
@@ -387,7 +393,7 @@ function _pollJob(job_id,thinkingEl,btn,startTime,errCount){
       const data=await res.json();
       if(data.status==='done'){
         thinkingEl.remove();
-        addMsg('assistant',data.text,data.saved_files||[]);
+        addMsg('assistant',data.text,data.saved_files||[],data.kb_count||0);
         refreshSessions(); btn.disabled=false; _currentPollTimer=null; return;
       }
       if(data.status==='error'||data.status==='expired'){
@@ -544,7 +550,7 @@ def get_job(job_id: str):
     if job["status"] == "done":
         with _jobs_lock:
             _jobs.pop(job_id, None)
-        return jsonify({"status": "done", "text": job["result"]["text"], "saved_files": job["result"]["saved_files"]})
+        return jsonify({"status": "done", "text": job["result"]["text"], "saved_files": job["result"]["saved_files"], "kb_count": job["result"].get("kb_count", 0)})
     if job["status"] == "error":
         with _jobs_lock:
             _jobs.pop(job_id, None)
