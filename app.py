@@ -599,13 +599,23 @@ def upload_kb():
         text = _extract_text(file_bytes, filename)
     else:
         text = file_bytes.decode("utf-8", errors="replace")[:200_000]
-    chunks = memory.add_kb_document(filename, text)
-    return jsonify({"ok": True, "filename": filename, "chunks": chunks})
+    try:
+        from rag.indexer import index_document
+        info = index_document(filename, text)
+        mode = "semántico + FTS5" if info["semantic"] else "FTS5"
+        return jsonify({"ok": True, "filename": filename, "chunks": info["chunks"], "mode": mode})
+    except Exception:
+        chunks = memory.add_kb_document(filename, text)
+        return jsonify({"ok": True, "filename": filename, "chunks": chunks, "mode": "FTS5"})
 
 
 @app.route("/api/kb/<path:filename>", methods=["DELETE"])
 def delete_kb(filename):
-    memory.delete_kb_document(filename)
+    try:
+        from rag.indexer import delete_document
+        delete_document(filename)
+    except Exception:
+        memory.delete_kb_document(filename)
     return jsonify({"ok": True})
 
 

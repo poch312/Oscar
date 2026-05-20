@@ -120,13 +120,16 @@ class OscarAgent:
 
     def _inject_kb(self, messages: list[dict], query: str, intent: str) -> list[dict]:
         """
-        Proactive RAG: always search the KB and inject results into the last
-        user message. The LLM sees the evidence before it generates anything.
-        No dependency on the model deciding to call buscar_en_base.
+        Proactive RAG: search KB (semantic or FTS5) and inject results into
+        the last user message before the LLM sees it.
         """
         if intent == "general":
             return messages
-        results = memory.search_kb(query, limit=3)
+        try:
+            from rag.retriever import search as rag_search
+            results = rag_search(query, limit=3)
+        except Exception:
+            results = memory.search_kb(query, limit=3)
         if not results:
             return messages
         block = "\n\n".join(
