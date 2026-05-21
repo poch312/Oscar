@@ -128,17 +128,17 @@ class OscarAgent:
                 seen.add(key)
                 results.append(r)
 
-        # 1. Global KB (all intents except pure general chat)
-        if intent != "general":
-            try:
-                from rag.retriever import search as rag_search
-                for r in rag_search(query, limit=5):
-                    _add(r)
-            except Exception:
-                for r in memory.search_kb(query, limit=5):
-                    _add(r)
+        # Always search global KB — if there are documents indexed, use them
+        # (removed intent gate: "general" queries about uploaded docs also need KB)
+        try:
+            from rag.retriever import search as rag_search
+            for r in rag_search(query, limit=5):
+                _add(r)
+        except Exception:
+            for r in memory.search_kb(query, limit=5):
+                _add(r)
 
-        # 2. Session documents — always searched so uploads are usable immediately
+        # Session documents — always searched
         for r in memory.search_session_docs(self.session_id, query, limit=3):
             _add(r)
 
