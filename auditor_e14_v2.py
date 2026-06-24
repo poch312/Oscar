@@ -232,7 +232,7 @@ class ReconocedorGoogleVision(Reconocedor):
 # UTILIDADES
 # ===========================================================================
 _PATRON_NOMBRE = re.compile(
-    r"Dep(\d+)-Mun(\d+)-Zona(\d+)-Puesto(\d+)-Mesa(\d+)", re.I)
+    r"Dep(\d+)-?Mun(\d+)-?Zona(\d+)-?Puesto(\d+)-?Mesa(\d+)", re.I)
 
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
@@ -318,18 +318,49 @@ def detectar_columna_nums(gris: np.ndarray) -> tuple[int, int]:
         return xs[-4], (W - 40) - xs[-4]
     return int(W * 0.84), int(W * 0.13)
 
-def asignar_filas(ys: list[int], candidatos: tuple) -> dict[str, tuple[int, int]]:
+def asignar_filas(ys: list[int], candidatos: tuple,
+                  gris: Optional[np.ndarray] = None) -> dict[str, tuple[int, int]]:
     filas = [(ys[i], ys[i+1]) for i in range(len(ys)-1) if ys[i+1]-ys[i] > 80]
     if len(filas) < 8:
         return {}
     asig: dict[str, tuple[int, int]] = {}
-    asig["total_votantes"]    = filas[1]
-    asig["total_votos_urna"]  = filas[2]
-    asig["votos_incinerados"] = filas[3]
+
+    # Candidatos: las filas con mayor altura en la zona media (excluye cabecera y pie)
     candidato_filas = sorted(filas[5:-5], key=lambda f: f[1]-f[0], reverse=True)
     for i, cand in enumerate(candidatos):
         if i < len(candidato_filas):
             asig[cand] = candidato_filas[i]
+
+    # NIVELACIÓN: buscar la franja "NIVELACIÓN DE LA MESA" (fondo negro, texto blanco).
+    # Es la primera franja oscura de la página (media de píxeles < 120).
+    # Las 3 filas que le siguen son total_votantes, total_votos_urna, votos_incinerados.
+    niv_encontrada = False
+    if gris is not None:
+        for i, (y1, y2) in enumerate(filas):
+            if float(np.mean(gris[y1:y2, :])) < 120 and i + 3 < len(filas):
+                niv = filas[i + 1: i + 4]
+                asig["total_votantes"]    = niv[0]
+                asig["total_votos_urna"]  = niv[1]
+                asig["votos_incinerados"] = niv[2]
+                niv_encontrada = True
+                break
+
+    if not niv_encontrada:
+        # Fallback sin imagen: 3 filas antes de donde empiezan los candidatos
+        cands_ordenadas = sorted(candidato_filas[:max(len(candidatos), 1)], key=lambda f: f[0])
+        inicio_cands = cands_ordenadas[0][0] if cands_ordenadas else filas[4][1]
+        filas_antes = [f for f in filas if f[1] <= inicio_cands]
+        if len(filas_antes) >= 3:
+            niv = filas_antes[-3:]
+            asig["total_votantes"]    = niv[0]
+            asig["total_votos_urna"]  = niv[1]
+            asig["votos_incinerados"] = niv[2]
+        else:
+            asig["total_votantes"]    = filas[1]
+            asig["total_votos_urna"]  = filas[2]
+            asig["votos_incinerados"] = filas[3]
+
+    # Pie: últimas filas del formulario
     asig["voto_en_blanco"] = filas[-5]
     asig["votos_nulos"]    = filas[-4]
     asig["no_marcados"]    = filas[-3]
@@ -373,7 +404,7 @@ def _clasificar_blob(binaria: np.ndarray, area_min: int,
 
     info.update({"frac_celda": frac_celda, "fill_ratio": fill_ratio, "aspect": aspect})
 
-    es_blob = fill_ratio > 0.55 and aspect > 0.30 and frac_celda > 0.08
+    es_blob = fill_ratio > 0.55 and aspect > 0.30 and frac_celda > 0.04
     if not es_blob:
         return "digito", info
 
@@ -622,7 +653,7 @@ def procesar_pdf_pasada1(pdf_path: Path, reco: Reconocedor,
         return acta
 
     x_col, w_col = detectar_columna_nums(gris)
-    asig = asignar_filas(ys, cfg.candidatos)
+    asig = asignar_filas(ys, cfg.candidatos, gris)
     if not asig:
         acta.fallo_extraccion = "No se pudo asignar filas al acta."
         return acta
@@ -739,6 +770,11 @@ def evaluar_señal_visual(s: SeñalesRaw, eb: EstadisticasBatch,
 
     if s.clase in ("vacia", "void", "void_con_digito"):
         return hallazgos  # solo familia G para estas clases
+
+    # Blob grande sin lectura OCR = círculo pre-impreso (●) con artefacto de escáner,
+    # no dígito manuscrito. Densidad > 0.30 distingue un ● de un trazo fino de pluma.
+    if s.densidad > 0.30 and not s.digito_ocr:
+        return hallazgos
 
     # Familia A — Topología (huecos inconsistentes)
     if s.digito_ocr and s.digito_ocr in cfg.huecos_esperados:
