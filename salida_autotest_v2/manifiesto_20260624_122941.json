@@ -1,0 +1,27 @@
+{
+  "version": "2.1.0",
+  "fecha": "20260624_122941",
+  "n_actas": 4,
+  "urgentes": 2,
+  "revisar": 0,
+  "manual": 0,
+  "limpias": 2,
+  "config": {
+    "candidatos": [
+      "cepeda",
+      "de_la_espriella"
+    ],
+    "eleccion_esperada": "presidencia_2v_2026",
+    "dpi": 300,
+    "score_umbral_urgente": 40.0,
+    "score_umbral_revisar": 20.0,
+    "n_sigma_outlier": 2.0,
+    "min_familias_coocurrentes": 2,
+    "umbral_confianza_ocr": 0.7,
+    "max_sufragantes_mesa": 400,
+    "tolerancia_nivelacion": 2,
+    "umbral_incineracion": 0.1,
+    "z_cross_mesa": 3.0,
+    "chi2_benford_critico": 20.09
+  }
+}

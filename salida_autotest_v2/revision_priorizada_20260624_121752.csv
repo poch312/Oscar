@@ -1,0 +1,5 @@
+PRIORIDAD,SCORE,TIER,departamento,municipio,zona,puesto,mesa,id_mesa,FAMILIA_PRINCIPAL,HALLAZGOS_PARA_REVISOR,cepeda_leido,espriella_leido,urna_leida,votantes_leidos,evidencia_img,archivo,sha256_16
+URGENTE,100,URGENTE,15,100,000,01,002,15-100-000-01-002,D|F,[F/cepeda] E-14=147 vs preconteo oficial=107 (dif +40) || [D/aritmetica] Suma 290 ≠ urna 260 (diferencia +30),147,137,260,260,,Dep15-Mun100-Zona000-Puesto01-Mesa002.pdf,
+URGENTE,100,URGENTE,03,037,099,05,010,03-037-099-05-010,D|E,"[E/nivelacion] Urna (192) < votantes E-11 (360), faltante 168 — incinerados (198) no explican el faltante || [D/aritmetica] Suma 156 ≠ urna 192 (diferencia -36) || [E/votos_incinerados] Incineración inusualmente alta: 198 = 55% del total",98,58,192,360,,Dep03-Mun037-Zona099-Puesto05-Mesa010.pdf,
+URGENTE,10,URGENTE,27,019,003,11,002,27-019-003-11-002,E,"[E/nivelacion] Urna (249) < votantes E-11 (250), faltante 1",163,82,249,250,,Dep27-Mun019-Zona003-Puesto11-Mesa002.pdf,
+,0,LIMPIA,15,100,000,01,001,15-100-000-01-001,,Sin hallazgos,117,137,260,260,,Dep15-Mun100-Zona000-Puesto01-Mesa001.pdf,
