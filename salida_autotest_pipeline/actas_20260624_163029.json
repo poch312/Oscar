@@ -1,0 +1,191 @@
+[
+  {
+    "archivo": "Dep15-Mun100-Zona000-Puesto01-Mesa001.pdf",
+    "hash_sha256": null,
+    "departamento": "15",
+    "municipio": "100",
+    "zona": "000",
+    "puesto": "01",
+    "mesa": "001",
+    "votos": {
+      "cepeda": 117,
+      "de_la_espriella": 137
+    },
+    "total_votos_urna": 260,
+    "total_votantes": 260,
+    "votos_incinerados": 0,
+    "voto_en_blanco": 5,
+    "votos_nulos": 1,
+    "no_marcados": 0,
+    "suma_total": 260,
+    "confianza": {
+      "cepeda": 0.95,
+      "de_la_espriella": 0.95,
+      "voto_en_blanco": 0.95,
+      "votos_nulos": 0.95,
+      "no_marcados": 0.95,
+      "total_votos_urna": 0.95
+    },
+    "score": 0.0,
+    "tier": "LIMPIA",
+    "dir_evidencia": "salida_autotest_pipeline",
+    "alineacion_ok": null,
+    "fallo_extraccion": null,
+    "pdf_software": null,
+    "pdf_fecha_creacion": null,
+    "señales_raw": [],
+    "hallazgos": [],
+    "id_mesa": "15-100-000-01-001"
+  },
+  {
+    "archivo": "Dep15-Mun100-Zona000-Puesto01-Mesa002.pdf",
+    "hash_sha256": null,
+    "departamento": "15",
+    "municipio": "100",
+    "zona": "000",
+    "puesto": "01",
+    "mesa": "002",
+    "votos": {
+      "cepeda": 147,
+      "de_la_espriella": 137
+    },
+    "total_votos_urna": 260,
+    "total_votantes": 260,
+    "votos_incinerados": 0,
+    "voto_en_blanco": 5,
+    "votos_nulos": 1,
+    "no_marcados": 0,
+    "suma_total": 290,
+    "confianza": {
+      "cepeda": 0.95,
+      "de_la_espriella": 0.95,
+      "voto_en_blanco": 0.95,
+      "votos_nulos": 0.95,
+      "no_marcados": 0.95,
+      "total_votos_urna": 0.95
+    },
+    "score": 100.0,
+    "tier": "URGENTE",
+    "dir_evidencia": "salida_autotest_pipeline",
+    "alineacion_ok": null,
+    "fallo_extraccion": null,
+    "pdf_software": null,
+    "pdf_fecha_creacion": null,
+    "señales_raw": [],
+    "hallazgos": [
+      {
+        "familia": "D",
+        "campo": "aritmetica",
+        "mensaje": "Suma 290 ≠ urna 260 (Δ=+30)",
+        "score_aporte": 50.0,
+        "evidencia_img": null
+      },
+      {
+        "familia": "F",
+        "campo": "cepeda",
+        "mensaje": "E-14=147 vs preconteo oficial=107 (Δ=+40)",
+        "score_aporte": 55.0,
+        "evidencia_img": null
+      }
+    ],
+    "id_mesa": "15-100-000-01-002"
+  },
+  {
+    "archivo": "Dep03-Mun037-Zona099-Puesto05-Mesa010.pdf",
+    "hash_sha256": null,
+    "departamento": "03",
+    "municipio": "037",
+    "zona": "099",
+    "puesto": "05",
+    "mesa": "010",
+    "votos": {
+      "cepeda": 98,
+      "de_la_espriella": 58
+    },
+    "total_votos_urna": 192,
+    "total_votantes": 360,
+    "votos_incinerados": 198,
+    "voto_en_blanco": 0,
+    "votos_nulos": 0,
+    "no_marcados": 0,
+    "suma_total": 156,
+    "confianza": {
+      "cepeda": 0.95,
+      "de_la_espriella": 0.95,
+      "voto_en_blanco": 0.95,
+      "votos_nulos": 0.95,
+      "no_marcados": 0.95,
+      "total_votos_urna": 0.95
+    },
+    "score": 100.0,
+    "tier": "URGENTE",
+    "dir_evidencia": "salida_autotest_pipeline",
+    "alineacion_ok": null,
+    "fallo_extraccion": null,
+    "pdf_software": null,
+    "pdf_fecha_creacion": null,
+    "señales_raw": [],
+    "hallazgos": [
+      {
+        "familia": "D",
+        "campo": "aritmetica",
+        "mensaje": "Suma 156 ≠ urna 192 (Δ=-36)",
+        "score_aporte": 50.0,
+        "evidencia_img": null
+      },
+      {
+        "familia": "E",
+        "campo": "nivelacion",
+        "mensaje": "Urna (192) < votantes E-11 (360), faltante 168 — incinerados (198) no cierran la brecha",
+        "score_aporte": 60.0,
+        "evidencia_img": null
+      },
+      {
+        "familia": "E",
+        "campo": "votos_incinerados",
+        "mensaje": "Incineración inusualmente alta: 198 = 55% del total",
+        "score_aporte": 20.0,
+        "evidencia_img": null
+      }
+    ],
+    "id_mesa": "03-037-099-05-010"
+  },
+  {
+    "archivo": "Dep03-Mun037-Zona099-Puesto05-Mesa011.pdf",
+    "hash_sha256": null,
+    "departamento": "03",
+    "municipio": "037",
+    "zona": "099",
+    "puesto": "05",
+    "mesa": "011",
+    "votos": {
+      "cepeda": 95,
+      "de_la_espriella": 60
+    },
+    "total_votos_urna": 185,
+    "total_votantes": 185,
+    "votos_incinerados": 0,
+    "voto_en_blanco": 20,
+    "votos_nulos": 10,
+    "no_marcados": 0,
+    "suma_total": 185,
+    "confianza": {
+      "cepeda": 0.95,
+      "de_la_espriella": 0.95,
+      "voto_en_blanco": 0.95,
+      "votos_nulos": 0.95,
+      "no_marcados": 0.95,
+      "total_votos_urna": 0.95
+    },
+    "score": 0.0,
+    "tier": "LIMPIA",
+    "dir_evidencia": "salida_autotest_pipeline",
+    "alineacion_ok": null,
+    "fallo_extraccion": null,
+    "pdf_software": null,
+    "pdf_fecha_creacion": null,
+    "señales_raw": [],
+    "hallazgos": [],
+    "id_mesa": "03-037-099-05-011"
+  }
+]
