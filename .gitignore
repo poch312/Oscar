@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# Salidas generadas por el pipeline (se regeneran al correr)
+resultados_e14/
+
+# Imágenes de diagnóstico generadas durante las pruebas
+actas_test/*.png
+
+# Corridas adicionales del autotest (sólo se mantiene la primera de referencia)
+salida_autotest_pipeline/actas_20260624_1[789]*.json
+salida_autotest_pipeline/actas_20260624_18*.json
+salida_autotest_pipeline/manifiesto_20260624_1[789]*.json
+salida_autotest_pipeline/manifiesto_20260624_18*.json
+salida_autotest_pipeline/reporte_20260624_1[789]*.html
+salida_autotest_pipeline/reporte_20260624_18*.html
+salida_autotest_pipeline/revision_priorizada_20260624_1[789]*.csv
+salida_autotest_pipeline/revision_priorizada_20260624_18*.csv
