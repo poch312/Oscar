@@ -38,6 +38,7 @@ FAMILIAS DE SEÑAL:
   F — Preconteo: valor leído ≠ preconteo oficial
   G — Borrado: grafito residual de borrado y reescritura
   H — Metadatos: PDF creado con software de edición (no escáner)
+  J — Jurados: faltan firmas de jurados de votación en página 2
   X — Cross-mesa: outlier estadístico dentro de su puesto de votación
   Z — Benford: distribución de primeros dígitos significativamente anómala
 
@@ -97,6 +98,7 @@ class Config:
     z_cross_mesa: float     = 3.0
     # Benford: chi2 mínimo (8 grados) para sospecha. Crítico al 1%: 20.09
     chi2_benford_critico: float = 20.09
+    umbral_firma_jurado: float  = 0.015
     # Metadatos PDF: software que NO es esperado en un escáner oficial
     software_sospechoso: tuple = (
         "photoshop", "gimp", "inkscape", "illustrator", "coreldraw",
@@ -168,6 +170,7 @@ class ActaE14:
     # Metadatos PDF (familia H)
     pdf_software: Optional[str] = None
     pdf_fecha_creacion: Optional[str] = None
+    firmas_jurados: Optional[list] = None
 
     @property
     def id_mesa(self) -> str:
@@ -619,6 +622,61 @@ def _analizar_metadata_pdf(doc, acta: ActaE14, cfg: Config) -> list[Hallazgo]:
     return hs
 
 
+def _auditar_firmas_jurados(doc, acta: ActaE14, cfg: Config,
+                             out: Path) -> list[Hallazgo]:
+    """
+    Familia J: detecta si las 6 firmas de jurados están presentes (página 2).
+    Divide la franja inferior de la página en 2 filas × 3 columnas y mide
+    densidad de tinta en la zona de firma (mitad inferior de cada celda,
+    para evitar el texto "JURADO N" en la mitad superior).
+    """
+    if not HAY_CV or doc.page_count < 2:
+        return []
+    try:
+        pix = doc.load_page(1).get_pixmap(dpi=150)
+        arr = np.frombuffer(pix.samples, np.uint8).reshape(
+            pix.height, pix.width, pix.n)
+        gris = cv2.cvtColor(
+            cv2.cvtColor(arr, cv2.COLOR_RGB2BGR if pix.n == 3 else cv2.COLOR_RGBA2BGR),
+            cv2.COLOR_BGR2GRAY)
+    except Exception:
+        return []
+    H, W = gris.shape
+    # Las firmas ocupan la franja 60-95% de la altura de la página 2
+    y1 = int(H * 0.60)
+    y2 = int(H * 0.95)
+    zona = gris[y1:y2, :]
+    Hz = zona.shape[0]
+    firmas: list[bool] = []
+    for fila in range(2):
+        y_ini = int(fila * Hz / 2)
+        y_fin = int((fila + 1) * Hz / 2)
+        y_firma = y_ini + (y_fin - y_ini) // 2  # mitad inferior → zona manuscrita
+        for col in range(3):
+            x_ini = int(col * W / 3) + 10
+            x_fin = int((col + 1) * W / 3) - 10
+            roi = zona[y_firma:y_fin, x_ini:x_fin]
+            if roi.size == 0:
+                firmas.append(False)
+                continue
+            densidad = float(np.mean(roi < 128))
+            tiene_firma = densidad > cfg.umbral_firma_jurado
+            firmas.append(tiene_firma)
+            n_jurado = fila * 3 + col + 1
+            cv2.imwrite(str(out / f"jurado{n_jurado}_firma.png"), roi)
+    acta.firmas_jurados = firmas
+    ausentes = [i + 1 for i, f in enumerate(firmas) if not f]
+    if not ausentes:
+        return []
+    n = len(ausentes)
+    aporte = min(50.0, n * 12.0)
+    return [Hallazgo(
+        "J", "firmas_jurados",
+        f"Faltan {n}/6 firma(s) de jurado(s) #{ausentes} — "
+        f"acta posiblemente no firmada o incompleta.",
+        aporte)]
+
+
 def procesar_pdf_pasada1(pdf_path: Path, reco: Reconocedor,
                           cfg: Config, dir_evi: Path) -> ActaE14:
     """Pasada 1: extrae señales raw sin producir veredictos."""
@@ -633,9 +691,10 @@ def procesar_pdf_pasada1(pdf_path: Path, reco: Reconocedor,
 
     try:
         doc = fitz.open(pdf_path)
-        # Análisis de metadatos PDF (familia H)
+        # Análisis de metadatos PDF (familia H) y firmas jurados (familia J)
         acta.señales_raw  # inicializar
-        _meta_hallazgos = _analizar_metadata_pdf(doc, acta, cfg)
+        _meta_hallazgos  = _analizar_metadata_pdf(doc, acta, cfg)
+        _firma_hallazgos = _auditar_firmas_jurados(doc, acta, cfg, out)
 
         pix = doc.load_page(0).get_pixmap(dpi=cfg.dpi)
         arr = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, pix.n)
@@ -658,8 +717,9 @@ def procesar_pdf_pasada1(pdf_path: Path, reco: Reconocedor,
         acta.fallo_extraccion = "No se pudo asignar filas al acta."
         return acta
 
-    # Guardar hallazgos de metadatos para pasada 2
-    acta._meta_hallazgos = _meta_hallazgos  # type: ignore[attr-defined]
+    # Guardar hallazgos de metadatos y firmas para pasada 2
+    acta._meta_hallazgos  = _meta_hallazgos   # type: ignore[attr-defined]
+    acta._firma_hallazgos = _firma_hallazgos  # type: ignore[attr-defined]
 
     for campo, (y1, y2) in asig.items():
         try:
@@ -815,9 +875,13 @@ def scoring_acta(acta: ActaE14, eb: EstadisticasBatch,
     acta.hallazgos = []
     score = 0.0
 
-    # Transferir hallazgos de metadatos PDF (familia H)
+    # Transferir hallazgos de metadatos PDF (familia H) y firmas (familia J)
     meta_hs = getattr(acta, "_meta_hallazgos", [])
     for h in meta_hs:
+        acta.hallazgos.append(h)
+        score += h.score_aporte
+    firma_hs = getattr(acta, "_firma_hallazgos", [])
+    for h in firma_hs:
         acta.hallazgos.append(h)
         score += h.score_aporte
 
@@ -949,10 +1013,13 @@ def scoring_acta(acta: ActaE14, eb: EstadisticasBatch,
         h.familia in ("A", "H") and h.score_aporte >= 40.0
         for h in acta.hallazgos)
     vis = any(h.familia in ("ABC",) for h in acta.hallazgos)
+    # ≥3 firmas ausentes (aporte ≥ 36 = 3×12) → acta sospechosa
+    firmas_criticas = any(
+        h.familia == "J" and h.score_aporte >= 36.0 for h in acta.hallazgos)
 
-    if det or manipulacion_directa:
+    if det or manipulacion_directa or firmas_criticas:
         acta.tier = Tier.URGENTE
-    elif vis:
+    elif vis or any(h.familia == "J" for h in acta.hallazgos):
         acta.tier = Tier.REVISAR
     elif any(s.clase == "ilegible" for s in acta.señales_raw):
         acta.tier = Tier.MANUAL
@@ -1088,7 +1155,7 @@ def generar_reporte(actas: list[ActaE14], out: Path, cfg: Config,
             "departamento", "municipio", "zona", "puesto", "mesa", "id_mesa",
             "FAMILIA_PRINCIPAL", "HALLAZGOS_PARA_REVISOR",
             "cepeda_leido", "espriella_leido", "urna_leida", "votantes_leidos",
-            "pdf_software", "evidencia_img", "archivo", "sha256_16"
+            "firmas_jurados", "pdf_software", "evidencia_img", "archivo", "sha256_16"
         ])
         for acta in actas_ord:
             prio = acta.tier.value if acta.hallazgos else ""
@@ -1098,6 +1165,9 @@ def generar_reporte(actas: list[ActaE14], out: Path, cfg: Config,
                       for h in sorted(acta.hallazgos, key=lambda x: -x.score_aporte)]
             hallazgos_str = " || ".join(partes) if partes else "Sin hallazgos"
             imgs = [h.evidencia_img for h in acta.hallazgos if h.evidencia_img]
+            firmas_col = (
+                f"{sum(1 for f in acta.firmas_jurados if f)}/6"
+                if acta.firmas_jurados is not None else "?")
             w.writerow([
                 prio, f"{acta.score:.0f}", acta.tier.value,
                 acta.departamento or "", acta.municipio or "",
@@ -1106,6 +1176,7 @@ def generar_reporte(actas: list[ActaE14], out: Path, cfg: Config,
                 acta.votos.get("cepeda", "?"),
                 acta.votos.get("de_la_espriella", "?"),
                 acta.total_votos_urna or "?", acta.total_votantes or "?",
+                firmas_col,
                 acta.pdf_software or "",
                 imgs[0] if imgs else "",
                 Path(acta.archivo).name,
@@ -1164,8 +1235,14 @@ def _generar_html(actas: list[ActaE14], out: Path, ts: str,
         votos_str = " / ".join(
             str(acta.votos.get(c, "?")) for c in ["cepeda", "de_la_espriella"])
         sw = f' <small style="color:#c00">({acta.pdf_software})</small>' if acta.pdf_software else ""
+        if acta.firmas_jurados is not None:
+            n_ok = sum(1 for f in acta.firmas_jurados if f)
+            firmas_str = f"{n_ok}/6"
+            firmas_color = "#c00" if n_ok <= 3 else "#d06000" if n_ok < 6 else "#007700"
+        else:
+            firmas_str, firmas_color = "—", "#888"
         hs_li = "".join(
-            f'<li style="color:{"#c00" if h.familia in ("D","E","F","H") else "#333"}">'
+            f'<li style="color:{"#c00" if h.familia in ("D","E","F","H","J") else "#333"}">'
             f'[{h.familia}] {h.mensaje} {_img(h.evidencia_img)}</li>'
             for h in sorted(acta.hallazgos, key=lambda x: -x.score_aporte))
         filas.append(
@@ -1173,6 +1250,7 @@ def _generar_html(actas: list[ActaE14], out: Path, ts: str,
             f'<td style="color:{color};font-weight:bold">{acta.tier.value}</td>'
             f"<td><b>{acta.score:.0f}</b></td>"
             f"<td><small>{acta.id_mesa}</small>{sw}</td>"
+            f'<td style="color:{firmas_color};font-weight:bold">{firmas_str}</td>'
             f"<td>{acta.total_votos_urna or '?'}</td>"
             f"<td>{votos_str}</td>"
             f'<td><ul style="margin:0;padding-left:14px;font-size:.83em">'
@@ -1230,7 +1308,7 @@ def _generar_html(actas: list[ActaE14], out: Path, ts: str,
         "<h2>Actas por prioridad</h2>"
         "<table><thead><tr>"
         "<th>Tier</th><th>Score</th><th>Mesa</th>"
-        "<th>Urna</th><th>Cepeda / De la Espriella</th><th>Hallazgos</th>"
+        "<th>Firmas</th><th>Urna</th><th>Cepeda / De la Espriella</th><th>Hallazgos</th>"
         f"</tr></thead><tbody>{''.join(filas)}</tbody></table>"
         f"{lote_html}"
         f"<p style='color:#888;font-size:.8em;margin-top:20px'>"
@@ -1470,6 +1548,24 @@ def _autotest():
     ok("Cross-mesa detecta outlier extremo", len(alertas) >= 1)
     ok("Cross-mesa identifica la mesa correcta",
        any(a["id_mesa"] == actas_cross[-1].id_mesa for a in alertas))
+
+    # Familia J: firmas de jurados
+    acta_j = acta_sim("Dep01-Mun001-Zona001-Puesto01-Mesa099.pdf", 80, 70, 150, 150)
+    acta_j._firma_hallazgos = [Hallazgo(
+        "J", "firmas_jurados",
+        "Faltan 4/6 firma(s) de jurado(s) #[1, 2, 3, 4] — acta posiblemente no firmada.",
+        48.0)]
+    scoring_acta(acta_j, eb_vacia, cfg, {})
+    ok("Familia J: 4 firmas ausentes → URGENTE", acta_j.tier == Tier.URGENTE)
+    ok("Familia J: score ≥ 48",                  acta_j.score >= 48.0)
+
+    acta_j2 = acta_sim("Dep01-Mun001-Zona001-Puesto01-Mesa098.pdf", 80, 70, 150, 150)
+    acta_j2._firma_hallazgos = [Hallazgo(
+        "J", "firmas_jurados",
+        "Faltan 2/6 firma(s) de jurado(s) #[1, 2] — acta posiblemente no firmada.",
+        24.0)]
+    scoring_acta(acta_j2, eb_vacia, cfg, {})
+    ok("Familia J: 2 firmas ausentes → REVISAR", acta_j2.tier == Tier.REVISAR)
 
     generar_reporte(actas, out, cfg)
 
