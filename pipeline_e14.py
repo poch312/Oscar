@@ -290,6 +290,7 @@ class SeñalesRaw:
     dens_interior_lazo: float = 0.0
     cv_ancho_trazo: float = 0.0
     tiene_trazo_horiz: bool = False
+    tiene_trazo_h_top: bool = False  # trazo horizontal en el tercio superior (señal de 7/4)
     borrado_score: float = 0.0
     digito_ocr: Optional[str] = None
     conf_ocr: float = 0.0
@@ -349,23 +350,44 @@ class Reconocedor:
         raise NotImplementedError
 
 class ReconocedorTesseract(Reconocedor):
+    _CONFIGS = [
+        "--psm 10 -c tessedit_char_whitelist=0123456789",
+        "--psm 8  -c tessedit_char_whitelist=0123456789",
+        "--psm 7  -c tessedit_char_whitelist=0123456789",
+        "--psm 13 -c tessedit_char_whitelist=0123456789",
+    ]
+
     def leer(self, roi):
         if not HAY_TESS:
             return None, 0.0
         try:
-            data = pytesseract.image_to_data(
-                roi, config="--psm 10 -c tessedit_char_whitelist=0123456789",
-                output_type=pytesseract.Output.DICT)
-            best_txt, best_conf = None, -1.0
-            for txt, conf in zip(data["text"], data["conf"]):
-                txt = txt.strip()
-                try: conf = float(conf)
-                except: continue
-                if txt.isdigit() and conf > best_conf:
-                    best_txt, best_conf = txt[0], conf
-            return (best_txt, max(0.0, best_conf) / 100.0) if best_txt else (None, 0.0)
+            h, w = roi.shape[:2]
+            up = cv2.resize(roi, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
+            blur = cv2.GaussianBlur(up, (3, 3), 0)
+            _, prep = cv2.threshold(blur, 0, 255,
+                                    cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         except Exception:
-            return None, 0.0
+            prep = roi
+
+        best_txt, best_conf = None, -1.0
+        for cfg in self._CONFIGS:
+            try:
+                data = pytesseract.image_to_data(
+                    prep, config=cfg,
+                    output_type=pytesseract.Output.DICT)
+                for txt, conf in zip(data["text"], data["conf"]):
+                    txt = txt.strip()
+                    try:
+                        conf = float(conf)
+                    except Exception:
+                        continue
+                    if txt.isdigit() and conf > best_conf:
+                        best_txt, best_conf = txt[0], conf
+                if best_conf >= 60.0:
+                    break
+            except Exception:
+                continue
+        return (best_txt, max(0.0, best_conf) / 100.0) if best_txt else (None, 0.0)
 
 class ReconocedorGoogleVision(Reconocedor):
     def __init__(self, clave_json: str):
@@ -463,8 +485,10 @@ def asignar_filas(ys: list[int], candidatos: tuple,
         return {}
     asig: dict[str, tuple[int, int]] = {}
 
-    # Candidatos: las filas con mayor altura en la zona media (excluye cabecera y pie)
-    candidato_filas = sorted(filas[5:-5], key=lambda f: f[1]-f[0], reverse=True)
+    # Candidatos: las N filas más altas en la zona media, asignadas de arriba hacia abajo.
+    n_cands = max(len(candidatos), 1)
+    filas_por_altura = sorted(filas[5:-5], key=lambda f: f[1]-f[0], reverse=True)
+    candidato_filas = sorted(filas_por_altura[:n_cands * 2][:n_cands], key=lambda f: f[0])
     for i, cand in enumerate(candidatos):
         if i < len(candidato_filas):
             asig[cand] = candidato_filas[i]
@@ -527,7 +551,7 @@ def _clasificar_blob(binaria: np.ndarray, area_min: int,
     fill_ratio = area_dom / max(1, bw * bh)
     aspect     = min(bw, bh) / max(bw, bh)
     info.update({"frac_celda": frac_celda, "fill_ratio": fill_ratio, "aspect": aspect})
-    es_blob = fill_ratio > 0.55 and aspect > 0.30 and frac_celda > 0.04
+    es_blob = fill_ratio > 0.55 and aspect > 0.30 and frac_celda > 0.02
     if not es_blob:
         return "digito", info
     bx = int(stat_dom[cv2.CC_STAT_LEFT])
@@ -555,7 +579,8 @@ def extraer_señales_casilla(roi_gris: np.ndarray, cfg: Config,
     b = cv2.morphologyEx(b, cv2.MORPH_OPEN,
                          cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2)))
     W_b = b.shape[1]
-    k_h = cv2.getStructuringElement(cv2.MORPH_RECT, (max(3, W_b//2), 2))
+    # 90 % umbral: elimina líneas de tabla (~100 % ancho) pero preserva trazos de dígitos
+    k_h = cv2.getStructuringElement(cv2.MORPH_RECT, (max(3, W_b * 9 // 10), 2))
     bordes_h = cv2.morphologyEx(b, cv2.MORPH_OPEN, k_h)
     b = cv2.bitwise_and(b, cv2.bitwise_not(bordes_h))
     area_total = b.shape[0] * b.shape[1]
@@ -602,6 +627,22 @@ def extraer_señales_casilla(roi_gris: np.ndarray, cfg: Config,
     k_t = cv2.getStructuringElement(cv2.MORPH_RECT, (largo, 1))
     s.tiene_trazo_horiz = cv2.countNonZero(
         cv2.morphologyEx(b, cv2.MORPH_OPEN, k_t)) > 0
+    # Tercio superior del DÍGITO normalizado al ancho real del dígito (no al de la casilla).
+    # Filas que son "trazo de dígito": entre 5 % y 92 % del ancho de la casilla.
+    _row_pcts = np.sum(b > 0, axis=1).astype(float) / max(1, W_b)
+    _d_rows = np.where((_row_pcts > 0.05) & (_row_pcts < 0.92))[0]
+    if _d_rows.size >= 3:
+        _dg_mask = np.zeros_like(b); _dg_mask[_d_rows] = b[_d_rows]
+        _xs_dig = np.where(np.sum(_dg_mask > 0, axis=0) > 0)[0]
+        _W_dig = int(_xs_dig.max()) - int(_xs_dig.min()) + 1 if _xs_dig.size > 0 else W_b
+        _largo_dig = max(3, int(_W_dig * 0.55))
+        _k_t_dig = cv2.getStructuringElement(cv2.MORPH_RECT, (_largo_dig, 1))
+        _y0_d = int(_d_rows.min()); _h_d = max(1, int(_d_rows.max()) - _y0_d)
+        b_dig_top = b[_y0_d : _y0_d + _h_d // 3, :]
+        s.tiene_trazo_h_top = cv2.countNonZero(
+            cv2.morphologyEx(b_dig_top, cv2.MORPH_OPEN, _k_t_dig)) > 0
+    else:
+        s.tiene_trazo_h_top = False
     s.digito_ocr, s.conf_ocr = reco.leer(roi_gris)
     if not s.digito_ocr:
         s.clase = "ilegible"
@@ -912,6 +953,31 @@ def scoring_acta(acta: ActaE14, eb: EstadisticasBatch,
                 f"Casilla {s.casilla+1} de '{s.campo}': blob ● con trazos adicionales — "
                 f"posible dígito escrito encima.", 65.0, ruta))
             score += 65.0
+    # G — Dígito de centenas con trazo horizontal en el tercio SUPERIOR cuando votantes ≤ 299
+    if acta.total_votantes is not None and acta.total_votantes <= 299:
+        for s in acta.señales_raw:
+            if (s.campo in cfg.candidatos
+                    and s.casilla == 0
+                    and s.tiene_trazo_h_top
+                    and s.clase in ("digito", "ilegible", "void_con_digito")):
+                acta.hallazgos.append(Hallazgo(
+                    "G", "centenas_trazo_horiz",
+                    f"Centenas de '{s.campo}' con trazo horizontal en parte alta (posible 7 o 4) "
+                    f"— imposible con solo {acta.total_votantes} votantes registrados.", 80.0))
+                score += 80.0
+
+    # D — Votos de un candidato superan la urna (check parcial, no requiere todos los campos)
+    urna_ref = acta.total_votos_urna or acta.total_votantes
+    if urna_ref is not None:
+        for cand, voto in acta.votos.items():
+            if voto is not None and voto > urna_ref:
+                acta.hallazgos.append(Hallazgo(
+                    "D", "votos_exceden_urna",
+                    f"Candidato '{cand}' con {voto} votos supera la urna/votantes "
+                    f"({urna_ref}) — aritméticamente imposible.", 100.0))
+                score += 100.0
+
+    # D — Aritmética completa
     comp = [acta.votos.get(c) for c in cfg.candidatos]
     comp += [acta.voto_en_blanco, acta.votos_nulos, acta.no_marcados]
     if all(v is not None for v in comp) and acta.total_votos_urna is not None:
@@ -1001,7 +1067,9 @@ def scoring_acta(acta: ActaE14, eb: EstadisticasBatch,
             "AMBOS candidatos tienen señales — posible manipulación balanceada "
             "(votos movidos entre candidatos; suma cuadra pero valores alterados).", 35.0))
     acta.score = min(score, 100.0)
-    det = any(h.familia in ("D","E","F") for h in acta.hallazgos)
+    det = any(h.familia in ("D","E","F") or
+              (h.familia == "G" and h.campo == "centenas_trazo_horiz")
+              for h in acta.hallazgos)
     manipulacion_directa = any(
         h.familia in ("A", "H") and h.score_aporte >= 40.0 for h in acta.hallazgos)
     vis = any(h.familia in ("ABC",) for h in acta.hallazgos)
