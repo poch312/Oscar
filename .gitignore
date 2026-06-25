@@ -8,12 +8,12 @@ resultados_e14/
 # Imágenes de diagnóstico generadas durante las pruebas
 actas_test/*.png
 
-# Corridas adicionales del autotest (sólo se mantiene la primera de referencia)
-salida_autotest_pipeline/actas_20260624_1[789]*.json
-salida_autotest_pipeline/actas_20260624_18*.json
-salida_autotest_pipeline/manifiesto_20260624_1[789]*.json
-salida_autotest_pipeline/manifiesto_20260624_18*.json
-salida_autotest_pipeline/reporte_20260624_1[789]*.html
-salida_autotest_pipeline/reporte_20260624_18*.html
-salida_autotest_pipeline/revision_priorizada_20260624_1[789]*.csv
-salida_autotest_pipeline/revision_priorizada_20260624_18*.csv
+# Salidas de autotest (se regeneran cada vez que corren)
+salida_autotest_pipeline/actas_*.json
+salida_autotest_pipeline/manifiesto_*.json
+salida_autotest_pipeline/reporte_*.html
+salida_autotest_pipeline/revision_priorizada_*.csv
+salida_autotest_v2/actas_*.json
+salida_autotest_v2/manifiesto_*.json
+salida_autotest_v2/reporte_*.html
+salida_autotest_v2/revision_priorizada_*.csv
