@@ -962,6 +962,22 @@ def scoring_acta(acta: ActaE14, eb: EstadisticasBatch,
                     f"— imposible con solo {acta.total_votantes} votantes registrados.", 80.0))
                 score += 80.0
 
+    # G — Fila de candidato completamente ilegible: tachón sobre el número original.
+    # Condición doble: (1) las 3 casillas son "ilegible" (ninguna legible ni vacía) Y
+    # (2) al menos 2 tienen densidad > 0.030 — el tachón deja más tinta que un
+    # guión(-) o dígito borroso (OCR failure en votación baja), que tienen densidad < 0.033.
+    for campo in cfg.candidatos:
+        cas = [s for s in acta.señales_raw if s.campo == campo]
+        if (len(cas) == 3
+                and all(s.clase == "ilegible" for s in cas)
+                and sum(1 for s in cas if s.densidad > 0.030) >= 2):
+            acta.hallazgos.append(Hallazgo(
+                "G", "tachon_fila",
+                f"Las 3 casillas de '{campo}' son ilegibles con alta densidad de tinta "
+                f"— posible tachón sobre el número original.",
+                70.0))
+            score += 70.0
+
     # D — Votos de un candidato superan la urna (check parcial, no requiere todos los campos)
     urna_ref = acta.total_votos_urna or acta.total_votantes
     if urna_ref is not None:
@@ -1084,7 +1100,7 @@ def scoring_acta(acta: ActaE14, eb: EstadisticasBatch,
 
     # Tier
     det = any(h.familia in ("D","E","F") or
-              (h.familia == "G" and h.campo == "centenas_trazo_horiz")
+              (h.familia == "G" and h.campo in ("centenas_trazo_horiz", "tachon_fila"))
               for h in acta.hallazgos)
     manipulacion_directa = any(
         h.familia in ("A", "H") and h.score_aporte >= 40.0
