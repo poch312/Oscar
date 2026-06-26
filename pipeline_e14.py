@@ -366,6 +366,18 @@ class ReconocedorTesseract(Reconocedor):
             blur = cv2.GaussianBlur(up, (3, 3), 0)
             _, prep = cv2.threshold(blur, 0, 255,
                                     cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            # En casillas muy altas el dígito ocupa solo una fracción pequeña.
+            # Recortar al bounding box de la tinta para que Tesseract lo vea grande.
+            inv = cv2.bitwise_not(prep)
+            ys = np.where(np.any(inv > 0, axis=1))[0]
+            xs = np.where(np.any(inv > 0, axis=0))[0]
+            if ys.size > 0 and xs.size > 0:
+                pad = 15
+                y0 = max(0, int(ys.min()) - pad)
+                y1 = min(prep.shape[0], int(ys.max()) + pad)
+                x0 = max(0, int(xs.min()) - pad)
+                x1 = min(prep.shape[1], int(xs.max()) + pad)
+                prep = prep[y0:y1, x0:x1]
         except Exception:
             prep = roi
 
@@ -453,16 +465,22 @@ def _detectar_borrado(roi_gris: np.ndarray) -> float:
 def detectar_lineas_horizontales(gris: np.ndarray) -> list[int]:
     H, W = gris.shape
     _, b = cv2.threshold(gris, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    k = cv2.getStructuringElement(cv2.MORPH_RECT, (W // 3, 2))
-    h = cv2.morphologyEx(b, cv2.MORPH_OPEN, k)
-    cnts, _ = cv2.findContours(h, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    ys_raw = sorted(
-        cv2.boundingRect(c)[1] + cv2.boundingRect(c)[3] // 2
-        for c in cnts if cv2.boundingRect(c)[2] > W // 3)
-    ys: list[int] = []
-    for y in ys_raw:
-        if not ys or y - ys[-1] > 30:
-            ys.append(y)
+    # Fotos tomadas con celular tienen líneas más cortas que escáner plano.
+    # Prueba fracciones decrecientes hasta obtener al menos 15 líneas.
+    for frac in (1/3, 1/4, 1/5, 1/6):
+        k_w = max(3, int(W * frac))
+        k = cv2.getStructuringElement(cv2.MORPH_RECT, (k_w, 2))
+        h = cv2.morphologyEx(b, cv2.MORPH_OPEN, k)
+        cnts, _ = cv2.findContours(h, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        ys_raw = sorted(
+            cv2.boundingRect(c)[1] + cv2.boundingRect(c)[3] // 2
+            for c in cnts if cv2.boundingRect(c)[2] > k_w)
+        ys: list[int] = []
+        for y in ys_raw:
+            if not ys or y - ys[-1] > 30:
+                ys.append(y)
+        if len(ys) >= 15:
+            return ys
     return ys
 
 def detectar_columna_nums(gris: np.ndarray) -> tuple[int, int]:
