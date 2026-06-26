@@ -2,8 +2,9 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Salidas generadas por el pipeline (se regeneran al correr)
+# Salidas generadas por el pipeline o auditor (se regeneran al correr)
 resultados_e14/
+salida_auditoria/
 
 # Imágenes de diagnóstico generadas durante las pruebas
 actas_test/*.png
