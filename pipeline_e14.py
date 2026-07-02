@@ -498,14 +498,22 @@ def detectar_columna_nums(gris: np.ndarray) -> tuple[int, int]:
 
 def asignar_filas(ys: list[int], candidatos: tuple,
                   gris: Optional[np.ndarray] = None) -> dict[str, tuple[int, int]]:
-    filas = [(ys[i], ys[i+1]) for i in range(len(ys)-1) if ys[i+1]-ys[i] > 80]
+    # Umbral relativo a la altura de la imagen: en el escáner oficial
+    # (~10900px) equivale a ~76px; en fotos de celular de menor resolución
+    # escala proporcionalmente en vez de descartar todas las filas.
+    h_ref = gris.shape[0] if gris is not None else (ys[-1] if ys else 0)
+    min_alto = max(25, int(h_ref * 0.007))
+    filas = [(ys[i], ys[i+1]) for i in range(len(ys)-1) if ys[i+1]-ys[i] > min_alto]
     if len(filas) < 8:
         return {}
     asig: dict[str, tuple[int, int]] = {}
 
     # Candidatos: las N filas más altas en la zona media, asignadas de arriba hacia abajo.
+    # Margen adaptativo: con pocas filas detectadas (fotos de celular) no se
+    # puede descartar 5 arriba y 5 abajo sin quedarse sin zona media.
     n_cands = max(len(candidatos), 1)
-    filas_por_altura = sorted(filas[5:-5], key=lambda f: f[1]-f[0], reverse=True)
+    margen = min(5, max(1, (len(filas) - n_cands) // 3))
+    filas_por_altura = sorted(filas[margen:-margen], key=lambda f: f[1]-f[0], reverse=True)
     candidato_filas = sorted(filas_por_altura[:n_cands * 2][:n_cands], key=lambda f: f[0])
     for i, cand in enumerate(candidatos):
         if i < len(candidato_filas):
@@ -1003,13 +1011,20 @@ def scoring_acta(acta: ActaE14, eb: EstadisticasBatch,
     # D — Votos de un candidato superan la urna (check parcial, no requiere todos los campos)
     urna_ref = acta.total_votos_urna or acta.total_votantes
     if urna_ref is not None:
+        campo_ref = ("total_votos_urna" if acta.total_votos_urna is not None
+                     else "total_votantes")
         for cand, voto in acta.votos.items():
             if voto is not None and voto > urna_ref:
+                conf_min = min(acta.confianza.get(cand, 1.0),
+                               acta.confianza.get(campo_ref, 1.0))
+                sev = 100.0 if conf_min >= cfg.umbral_confianza_ocr else 15.0
                 acta.hallazgos.append(Hallazgo(
                     "D", "votos_exceden_urna",
                     f"Candidato '{cand}' con {voto} votos supera la urna/votantes "
-                    f"({urna_ref}) — aritméticamente imposible.", 100.0))
-                score += 100.0
+                    f"({urna_ref}) — aritméticamente imposible."
+                    + ("" if sev == 100.0
+                       else f" Confianza OCR baja ({conf_min:.0%})."), sev))
+                score += sev
 
     # D — Aritmética completa
     comp = [acta.votos.get(c) for c in cfg.candidatos]
@@ -1036,19 +1051,29 @@ def scoring_acta(acta: ActaE14, eb: EstadisticasBatch,
                 "D", "suma_total",
                 f"Suma escrita por jurados ({acta.suma_total}) ≠ calculada ({suma})", 40.0))
             score += 40.0
+    # Igual que D/aritmética: si la confianza OCR de los campos comparados es
+    # baja, degradar severidad — un dígito mal leído no debe producir URGENTE.
     V, U, I = acta.total_votantes, acta.total_votos_urna, acta.votos_incinerados
     if V is not None and U is not None:
+        conf_niv = min(acta.confianza.get("total_votantes", 1.0),
+                       acta.confianza.get("total_votos_urna", 1.0))
+        ocr_fiable = conf_niv >= cfg.umbral_confianza_ocr
         if U > V:
+            sev = 60.0 if ocr_fiable else 10.0
             acta.hallazgos.append(Hallazgo(
-                "E", "nivelacion", f"Urna ({U}) > votantes E-11 ({V}): físicamente imposible", 60.0))
-            score += 60.0
+                "E", "nivelacion",
+                f"Urna ({U}) > votantes E-11 ({V}): físicamente imposible"
+                + ("" if ocr_fiable else f" — confianza OCR baja ({conf_niv:.0%})"),
+                sev))
+            score += sev
         elif U < V:
             dif = V - U
-            sev = 60.0 if dif > cfg.tolerancia_nivelacion else 10.0
+            sev = 60.0 if (dif > cfg.tolerancia_nivelacion and ocr_fiable) else 10.0
             acta.hallazgos.append(Hallazgo(
                 "E", "nivelacion",
                 f"Urna ({U}) < votantes E-11 ({V}), faltante {dif}"
-                + (f" — incinerados ({I}) no cierran la brecha" if I and U+I != V else ""),
+                + (f" — incinerados ({I}) no cierran la brecha" if I and U+I != V else "")
+                + ("" if ocr_fiable else f" — confianza OCR baja ({conf_niv:.0%})"),
                 sev))
             score += sev
     if I is not None and I > 0:
@@ -1101,7 +1126,9 @@ def scoring_acta(acta: ActaE14, eb: EstadisticasBatch,
             "AMBOS candidatos tienen señales — posible manipulación balanceada "
             "(votos movidos entre candidatos; suma cuadra pero valores alterados).", 35.0))
     acta.score = min(score, 100.0)
-    det = any(h.familia in ("D","E","F") or
+    # Solo hallazgos deterministas con severidad real fuerzan URGENTE: los
+    # degradados por baja confianza OCR (10-15 pts) no son evidencia firme.
+    det = any((h.familia in ("D","E","F") and h.score_aporte >= 40.0) or
               (h.familia == "G" and h.campo in ("centenas_trazo_horiz", "tachon_fila"))
               for h in acta.hallazgos)
     manipulacion_directa = any(
@@ -1490,8 +1517,14 @@ def _autotest():
         acta_sim("Dep15-Mun100-Zona000-Puesto01-Mesa002.pdf", 147, 137, 260, 260, blanco=5, nulos=1),
         acta_sim("Dep03-Mun037-Zona099-Puesto05-Mesa010.pdf", 98, 58, 192, 360, inc=198),
         acta_sim("Dep03-Mun037-Zona099-Puesto05-Mesa011.pdf", 95, 60, 185, 185, blanco=20, nulos=10),
+        # Mesa 012: nivelación rota pero OCR de baja confianza → NO urgente
+        acta_sim("Dep03-Mun037-Zona099-Puesto05-Mesa012.pdf", 98, 58, 192, 360, blanco=20, nulos=16),
     ]
     oficiales = {"15-100-000-01-002": {"cepeda": 107}}
+
+    mesa012 = next(a for a in actas if "Mesa012" in a.archivo)
+    mesa012.confianza["total_votos_urna"] = 0.35  # OCR dudoso
+
     eb_vacia = EstadisticasBatch()
     for acta in actas:
         scoring_acta(acta, eb_vacia, cfg, oficiales)
@@ -1505,6 +1538,9 @@ def _autotest():
     ok("Mesa002 score≥50",        mesa002.score >= 50.0)
     ok("Mesa002 familia D+F",     {"D","F"} <= {h.familia for h in mesa002.hallazgos})
     ok("Mesa010 URGENTE/REVISAR", mesa010.tier in (Tier.URGENTE, Tier.REVISAR))
+    ok("Mesa012 OCR dudoso NO urgente", mesa012.tier != Tier.URGENTE)
+    ok("Mesa012 conserva hallazgo E",
+       any(h.familia == "E" for h in mesa012.hallazgos))
 
     import random as _rnd
     actas_benford: list[ActaE14] = []
