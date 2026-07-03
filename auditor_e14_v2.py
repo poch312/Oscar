@@ -695,57 +695,158 @@ def _analizar_metadata_pdf(doc, acta: ActaE14, cfg: Config) -> list[Hallazgo]:
     return hs
 
 
-def _auditar_firmas_jurados(doc, acta: ActaE14, cfg: Config,
-                             out: Path) -> list[Hallazgo]:
-    """
-    Familia J: detecta si las 6 firmas de jurados están presentes (página 2).
-    Divide la franja inferior de la página en 2 filas × 3 columnas y mide
-    densidad de tinta en la zona de firma (mitad inferior de cada celda,
-    para evitar el texto "JURADO N" en la mitad superior).
-    """
-    if not HAY_CV or doc.page_count < 2:
-        return []
+def _rasterizar_pagina(doc, idx: int, dpi: int) -> Optional[np.ndarray]:
+    """Rasteriza una página del PDF a escala de grises. None si falla."""
     try:
-        pix = doc.load_page(1).get_pixmap(dpi=150)
+        pix = doc.load_page(idx).get_pixmap(dpi=dpi)
         arr = np.frombuffer(pix.samples, np.uint8).reshape(
             pix.height, pix.width, pix.n)
-        gris = cv2.cvtColor(
+        return cv2.cvtColor(
             cv2.cvtColor(arr, cv2.COLOR_RGB2BGR if pix.n == 3 else cv2.COLOR_RGBA2BGR),
             cv2.COLOR_BGR2GRAY)
     except Exception:
+        return None
+
+
+def _clasificar_paginas(doc) -> tuple[Optional[int], Optional[int], list[int]]:
+    """
+    Clasifica las páginas del PDF: (pág. de votos, pág. de constancias,
+    págs. placeholder tipo "PÁGINA NO DIGITALIZADA").
+
+    Discriminador calibrado con actas reales (nacional + consulado,
+    escáner + foto de celular):
+      - votos: tabla completa (nivelación+candidatos+pie) → ≥14 líneas horiz.
+      - constancias: página 2 del formulario → 7-12 líneas.
+      - placeholder: casi sin tinta ni líneas (mesa no digitalizada).
+
+    La Registraduría a veces publica el PDF SIN la página de votos
+    (placeholder "PÁGINA NO DIGITALIZADA") — esa mesa escapa a toda
+    auditoría y debe levantarse como alerta, no como fallo de extracción.
+    """
+    votos: Optional[int] = None
+    constancias: Optional[int] = None
+    placeholders: list[int] = []
+    candidatas_votos: list[tuple[int, int]] = []
+    for i in range(doc.page_count):
+        gris = _rasterizar_pagina(doc, i, dpi=100)
+        if gris is None:
+            continue
+        tinta = float(np.mean(gris < 128))
+        n_lineas = len(detectar_lineas_horizontales(gris))
+        if tinta < 0.05 and n_lineas < 5:
+            placeholders.append(i)
+        elif n_lineas >= 14:
+            candidatas_votos.append((n_lineas, i))
+        elif constancias is None:
+            constancias = i
+    if candidatas_votos:
+        candidatas_votos.sort(reverse=True)
+        votos = candidatas_votos[0][1]
+        if constancias is None and len(candidatas_votos) > 1:
+            constancias = candidatas_votos[1][1]
+    return votos, constancias, placeholders
+
+
+def _detectar_cajas_firma(gris: np.ndarray) -> list[tuple[int, int, int, int]]:
+    """
+    Encuentra las casillas "FIRMA JURADO N" en la página de constancias
+    por contornos (rectángulos de ~media página de ancho en el tercio
+    inferior). Autodetecta el layout: nacional = 6 cajas (3×2),
+    consulado = 4 cajas (2×2). Devuelve (x, y, w, h) en orden de lectura.
+    """
+    H, W = gris.shape
+    y0 = int(H * 0.55)
+    zona = gris[y0:, :]
+    b = cv2.adaptiveThreshold(zona, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                              cv2.THRESH_BINARY_INV, 35, 10)
+    k = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    b = cv2.morphologyEx(b, cv2.MORPH_CLOSE, k)
+    cnts, _ = cv2.findContours(b, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    cajas = []
+    for c in cnts:
+        x, y, w, h = cv2.boundingRect(c)
+        if 0.30 * W <= w <= 0.60 * W and 0.025 * H <= h <= 0.15 * H:
+            cajas.append((x, y + y0, w, h))
+    # Deduplicar contorno interno/externo de la misma caja
+    cajas.sort(key=lambda r: (r[1], r[0]))
+    unicas: list[tuple[int, int, int, int]] = []
+    for r in cajas:
+        if not any(abs(r[0]-u[0]) < W*0.05 and abs(r[1]-u[1]) < H*0.02
+                   for u in unicas):
+            unicas.append(r)
+    if not unicas:
+        return []
+    # Orden de lectura: filas agrupadas por y, columnas por x
+    alto_med = float(np.median([h for *_, h in unicas]))
+    unicas.sort(key=lambda r: (round(r[1] / max(1.0, alto_med * 0.8)), r[0]))
+    return unicas
+
+
+def _auditar_firmas_jurados(doc, acta: ActaE14, cfg: Config, out: Path,
+                             pagina: Optional[int] = None) -> list[Hallazgo]:
+    """
+    Familia J: detecta si las firmas de jurados están presentes en la
+    página de constancias. Localiza las casillas "FIRMA JURADO N" por
+    contornos (4 en formato consulado, 6 en nacional) y mide la tinta
+    manuscrita dentro de cada una (excluyendo la etiqueta impresa).
+    Si no encuentra las casillas, cae a la grilla fija 2×3 (60-95%).
+    """
+    if not HAY_CV:
+        return []
+    if pagina is None:
+        if doc.page_count < 2:
+            return []
+        pagina = 1
+    gris = _rasterizar_pagina(doc, pagina, dpi=150)
+    if gris is None:
         return []
     H, W = gris.shape
-    # Las firmas ocupan la franja 60-95% de la altura de la página 2
-    y1 = int(H * 0.60)
-    y2 = int(H * 0.95)
-    zona = gris[y1:y2, :]
-    Hz = zona.shape[0]
     firmas: list[bool] = []
-    for fila in range(2):
-        y_ini = int(fila * Hz / 2)
-        y_fin = int((fila + 1) * Hz / 2)
-        y_firma = y_ini + (y_fin - y_ini) // 2  # mitad inferior → zona manuscrita
-        for col in range(3):
-            x_ini = int(col * W / 3) + 10
-            x_fin = int((col + 1) * W / 3) - 10
-            roi = zona[y_firma:y_fin, x_ini:x_fin]
+    cajas = _detectar_cajas_firma(gris)
+    if len(cajas) in (4, 6):
+        # Umbral para densidad con umbral adaptativo (robusto a sombras de
+        # fotos): firmas reales miden ≥0.067, cajas vacías ≤0.013.
+        UMBRAL_CAJA = 0.035
+        for n_jurado, (x, y, w, h) in enumerate(cajas, start=1):
+            roi = gris[y + int(h*0.30): y + h - 3, x + 3: x + w - 3]
             if roi.size == 0:
                 firmas.append(False)
                 continue
-            densidad = float(np.mean(roi < 128))
-            tiene_firma = densidad > cfg.umbral_firma_jurado
-            firmas.append(tiene_firma)
-            n_jurado = fila * 3 + col + 1
+            rb = cv2.adaptiveThreshold(roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                       cv2.THRESH_BINARY_INV, 35, 12)
+            firmas.append(float(np.mean(rb > 0)) > UMBRAL_CAJA)
             cv2.imwrite(str(out / f"jurado{n_jurado}_firma.png"), roi)
+    else:
+        # Fallback: grilla fija 2×3 sobre la franja 60-95% (comportamiento
+        # anterior, solo si las cajas no son detectables).
+        y1, y2 = int(H * 0.60), int(H * 0.95)
+        zona = gris[y1:y2, :]
+        Hz = zona.shape[0]
+        for fila in range(2):
+            y_ini = int(fila * Hz / 2)
+            y_fin = int((fila + 1) * Hz / 2)
+            y_firma = y_ini + (y_fin - y_ini) // 2  # mitad inferior → manuscrito
+            for col in range(3):
+                x_ini = int(col * W / 3) + 10
+                x_fin = int((col + 1) * W / 3) - 10
+                roi = zona[y_firma:y_fin, x_ini:x_fin]
+                if roi.size == 0:
+                    firmas.append(False)
+                    continue
+                densidad = float(np.mean(roi < 128))
+                firmas.append(densidad > cfg.umbral_firma_jurado)
+                n_jurado = fila * 3 + col + 1
+                cv2.imwrite(str(out / f"jurado{n_jurado}_firma.png"), roi)
     acta.firmas_jurados = firmas
     ausentes = [i + 1 for i, f in enumerate(firmas) if not f]
     if not ausentes:
         return []
     n = len(ausentes)
+    total = len(firmas)
     aporte = min(50.0, n * 12.0)
     return [Hallazgo(
         "J", "firmas_jurados",
-        f"Faltan {n}/6 firma(s) de jurado(s) #{ausentes} — "
+        f"Faltan {n}/{total} firma(s) de jurado(s) #{ausentes} — "
         f"acta posiblemente no firmada o incompleta.",
         aporte)]
 
@@ -764,12 +865,24 @@ def procesar_pdf_pasada1(pdf_path: Path, reco: Reconocedor,
 
     try:
         doc = fitz.open(pdf_path)
-        # Análisis de metadatos PDF (familia H) y firmas jurados (familia J)
         acta.señales_raw  # inicializar
-        _meta_hallazgos  = _analizar_metadata_pdf(doc, acta, cfg)
-        _firma_hallazgos = _auditar_firmas_jurados(doc, acta, cfg, out)
+        # Clasificar páginas: votos / constancias / placeholder
+        pag_votos, pag_const, pags_ph = _clasificar_paginas(doc)
+        # Análisis de metadatos PDF (familia H) y firmas jurados (familia J)
+        # — se guardan ANTES de los early-return para no perderlos si la
+        # extracción de la tabla falla.
+        acta._meta_hallazgos  = _analizar_metadata_pdf(doc, acta, cfg)   # type: ignore[attr-defined]
+        acta._firma_hallazgos = _auditar_firmas_jurados(                 # type: ignore[attr-defined]
+            doc, acta, cfg, out, pagina=pag_const)
 
-        pix = doc.load_page(0).get_pixmap(dpi=cfg.dpi)
+        if pag_votos is None:
+            # El PDF publicado NO contiene la tabla de votos (p. ej.
+            # "PÁGINA NO DIGITALIZADA"). No es un fallo de extracción:
+            # es un hallazgo de primer orden (familia I en pasada 2).
+            acta._pagina_votos_faltante = True  # type: ignore[attr-defined]
+            return acta
+
+        pix = doc.load_page(pag_votos).get_pixmap(dpi=cfg.dpi)
         arr = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, pix.n)
         img_bgr = cv2.cvtColor(
             arr, cv2.COLOR_RGB2BGR if pix.n == 3 else cv2.COLOR_RGBA2BGR)
@@ -789,10 +902,6 @@ def procesar_pdf_pasada1(pdf_path: Path, reco: Reconocedor,
     if not asig:
         acta.fallo_extraccion = "No se pudo asignar filas al acta."
         return acta
-
-    # Guardar hallazgos de metadatos y firmas para pasada 2
-    acta._meta_hallazgos  = _meta_hallazgos   # type: ignore[attr-defined]
-    acta._firma_hallazgos = _firma_hallazgos  # type: ignore[attr-defined]
 
     for campo, (y1, y2) in asig.items():
         try:
@@ -957,6 +1066,18 @@ def scoring_acta(acta: ActaE14, eb: EstadisticasBatch,
     for h in firma_hs:
         acta.hallazgos.append(h)
         score += h.score_aporte
+
+    # I — La página con la tabla de votos NO está en el PDF publicado
+    # ("PÁGINA NO DIGITALIZADA"). La mesa escapa a toda auditoría del E-14
+    # de transmisión: alerta de primer orden para reclamación.
+    if getattr(acta, "_pagina_votos_faltante", False):
+        acta.hallazgos.append(Hallazgo(
+            "I", "pagina_votos_no_digitalizada",
+            "El PDF publicado NO contiene la página con la tabla de votos "
+            "(aparece 'PÁGINA NO DIGITALIZADA' o solo la página de "
+            "constancias). Imposible verificar cifras — solicitar el acta "
+            "física o la copia de claveros.", 85.0))
+        score += 85.0
 
     # ── VOID CON DÍGITO (manipulación directa) ────────────────────────────
     for s in acta.señales_raw:
@@ -1143,7 +1264,7 @@ def scoring_acta(acta: ActaE14, eb: EstadisticasBatch,
     # Tier
     # Solo hallazgos deterministas con severidad real fuerzan URGENTE: los
     # degradados por baja confianza OCR (10-15 pts) no son evidencia firme.
-    det = any((h.familia in ("D","E","F") and h.score_aporte >= 40.0) or
+    det = any((h.familia in ("D","E","F","I") and h.score_aporte >= 40.0) or
               (h.familia == "G" and h.campo in ("centenas_trazo_horiz", "tachon_fila"))
               for h in acta.hallazgos)
     manipulacion_directa = any(
@@ -1303,7 +1424,7 @@ def generar_reporte(actas: list[ActaE14], out: Path, cfg: Config,
             hallazgos_str = " || ".join(partes) if partes else "Sin hallazgos"
             imgs = [h.evidencia_img for h in acta.hallazgos if h.evidencia_img]
             firmas_col = (
-                f"{sum(1 for f in acta.firmas_jurados if f)}/6"
+                f"{sum(1 for f in acta.firmas_jurados if f)}/{len(acta.firmas_jurados)}"
                 if acta.firmas_jurados is not None else "?")
             w.writerow([
                 prio, f"{acta.score:.0f}", acta.tier.value,
@@ -1374,12 +1495,14 @@ def _generar_html(actas: list[ActaE14], out: Path, ts: str,
         sw = f' <small style="color:#c00">({acta.pdf_software})</small>' if acta.pdf_software else ""
         if acta.firmas_jurados is not None:
             n_ok = sum(1 for f in acta.firmas_jurados if f)
-            firmas_str = f"{n_ok}/6"
-            firmas_color = "#c00" if n_ok <= 3 else "#d06000" if n_ok < 6 else "#007700"
+            n_tot = len(acta.firmas_jurados)
+            firmas_str = f"{n_ok}/{n_tot}"
+            firmas_color = ("#c00" if n_ok <= n_tot // 2
+                            else "#d06000" if n_ok < n_tot else "#007700")
         else:
             firmas_str, firmas_color = "—", "#888"
         hs_li = "".join(
-            f'<li style="color:{"#c00" if h.familia in ("D","E","F","H","J") else "#333"}">'
+            f'<li style="color:{"#c00" if h.familia in ("D","E","F","H","I","J") else "#333"}">'
             f'[{h.familia}] {h.mensaje} {_img(h.evidencia_img)}</li>'
             for h in sorted(acta.hallazgos, key=lambda x: -x.score_aporte))
         filas.append(
@@ -1712,6 +1835,16 @@ def _autotest():
         24.0)]
     scoring_acta(acta_j2, eb_vacia, cfg, {})
     ok("Familia J: 2 firmas ausentes → REVISAR", acta_j2.tier == Tier.REVISAR)
+
+    # Familia I: PDF publicado sin la página de la tabla de votos
+    acta_i = ActaE14(archivo="Dep88-Mun815-Zona065-Puesto09-Mesa001.pdf")
+    identidad_desde_nombre(acta_i, Path(acta_i.archivo))
+    acta_i._pagina_votos_faltante = True
+    scoring_acta(acta_i, eb_vacia, cfg, {})
+    ok("Familia I: página de votos faltante → URGENTE",
+       acta_i.tier == Tier.URGENTE)
+    ok("Familia I: hallazgo registrado",
+       any(h.familia == "I" for h in acta_i.hallazgos))
 
     generar_reporte(actas, out, cfg)
 
