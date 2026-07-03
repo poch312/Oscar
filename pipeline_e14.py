@@ -401,6 +401,44 @@ class ReconocedorTesseract(Reconocedor):
                 continue
         return (best_txt, max(0.0, best_conf) / 100.0) if best_txt else (None, 0.0)
 
+class ReconocedorEasyOCR(Reconocedor):
+    """
+    OCR local GRATUITO con red neuronal (pip install easyocr).
+    Lee manuscrito mucho mejor que Tesseract. La primera ejecución
+    descarga los modelos (~110 MB) una sola vez; después funciona
+    sin internet. CPU: ~1-2 s por casilla.
+    """
+    def __init__(self):
+        try:
+            import easyocr
+        except ImportError:
+            raise RuntimeError("pip install easyocr")
+        self._reader = easyocr.Reader(["es"], gpu=False, verbose=False)
+
+    def leer(self, roi):
+        try:
+            # Recortar al bounding box de la tinta (igual que Tesseract):
+            # en casillas altas el dígito ocupa una fracción pequeña.
+            _, b = cv2.threshold(roi, 0, 255,
+                                 cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            ys = np.where(np.any(b > 0, axis=1))[0]
+            xs = np.where(np.any(b > 0, axis=0))[0]
+            if ys.size and xs.size:
+                pad = 12
+                roi = roi[max(0, int(ys.min())-pad): int(ys.max())+pad,
+                          max(0, int(xs.min())-pad): int(xs.max())+pad]
+            res = self._reader.readtext(roi, allowlist="0123456789",
+                                        text_threshold=0.3, low_text=0.2)
+        except Exception:
+            return None, 0.0
+        candidatos = [(t.strip(), float(c)) for _, t, c in res
+                      if t.strip().isdigit()]
+        if not candidatos:
+            return None, 0.0
+        txt, conf = max(candidatos, key=lambda x: x[1])
+        return txt[0], conf
+
+
 class ReconocedorGoogleVision(Reconocedor):
     def __init__(self, clave_json: str):
         try:
@@ -1541,6 +1579,12 @@ def auditar(carpeta, salida, oficiales_path, ocr_motor, google_key):
             print("[ERROR] --ocr google requiere --google-key")
             return
         reco: Reconocedor = ReconocedorGoogleVision(google_key)
+    elif ocr_motor == "easyocr":
+        try:
+            reco = ReconocedorEasyOCR()
+            print("[OK] EasyOCR listo (OCR neuronal local, gratuito).")
+        except RuntimeError as e:
+            print(f"[ERROR] {e}"); return
     else:
         if not HAY_TESS:
             print("[AVISO] Tesseract no disponible; cifras no se leerán.")
@@ -1762,7 +1806,8 @@ FORMATO CSV (--lista):
                                      help="Solo verificar integridad de los PDFs")
     p.add_argument("--oficiales",    default=None,
                                      help="JSON con preconteo oficial por mesa")
-    p.add_argument("--ocr",          default="tesseract", choices=["tesseract", "google"])
+    p.add_argument("--ocr",          default="tesseract",
+                                     choices=["tesseract", "easyocr", "google"])
     p.add_argument("--google-key",   default=None,
                                      help="Credenciales Google Cloud Vision (.json)")
     p.add_argument("--autotest",     action="store_true",
