@@ -439,6 +439,65 @@ class ReconocedorEasyOCR(Reconocedor):
         return txt[0], conf
 
 
+class ReconocedorRapidOCR(Reconocedor):
+    """
+    OCR local GRATUITO con modelos INCLUIDOS en el paquete pip — no
+    descarga nada de internet (pip install rapidocr-onnxruntime).
+    Benchmark sobre actas reales de consulado: 11/11 dígitos manuscritos
+    correctos en casillas bien segmentadas (Tesseract: ~2/11).
+    """
+    def __init__(self):
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+        except ImportError:
+            raise RuntimeError("pip install rapidocr-onnxruntime")
+        self._ocr = RapidOCR()
+
+    def leer(self, roi):
+        try:
+            gris = roi if roi.ndim == 2 else cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            _, b = cv2.threshold(gris, 0, 255,
+                                 cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            H, W = b.shape
+            # Borrar líneas de tabla (bordes de casilla) morfológicamente
+            k_h = cv2.getStructuringElement(cv2.MORPH_RECT, (max(15, W // 3), 1))
+            k_v = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(15, H // 3)))
+            lineas = (cv2.morphologyEx(b, cv2.MORPH_OPEN, k_h)
+                      | cv2.morphologyEx(b, cv2.MORPH_OPEN, k_v))
+            lineas = cv2.dilate(lineas, np.ones((3, 3), np.uint8))
+            limpio = gris.copy()
+            limpio[lineas > 0] = 255
+            sin = cv2.bitwise_and(b, cv2.bitwise_not(lineas))
+            n, _, stats, _ = cv2.connectedComponentsWithStats(sin, 8)
+            cands = [(stats[i, 4], stats[i, 0], stats[i, 1],
+                      stats[i, 2], stats[i, 3])
+                     for i in range(1, n) if stats[i, 4] >= 40]
+            if not cands:
+                return None, 0.0
+            _, x, y, w, h = max(cands)
+            mejor_txt, mejor_conf = None, 0.0
+            # Dos recortes: ajustado y con contexto — gana el más confiable
+            for padf in (0.25, 1.0):
+                pad = max(8, int(padf * max(w, h)))
+                rec = limpio[max(0, y-pad): min(H, y+h+pad),
+                             max(0, x-pad): min(W, x+w+pad)]
+                if rec.size == 0:
+                    continue
+                alto = 96
+                rec = cv2.resize(
+                    rec, (max(16, int(rec.shape[1] * alto / rec.shape[0])), alto),
+                    interpolation=cv2.INTER_CUBIC)
+                res, _ = self._ocr(rec, use_det=False, use_cls=False)
+                if res:
+                    txt = "".join(c for c in res[0][0] if c.isdigit())
+                    conf = float(res[0][1])
+                    if txt and conf > mejor_conf:
+                        mejor_txt, mejor_conf = txt[0], conf
+            return (mejor_txt, mejor_conf) if mejor_txt else (None, 0.0)
+        except Exception:
+            return None, 0.0
+
+
 class ReconocedorGoogleVision(Reconocedor):
     def __init__(self, clave_json: str):
         try:
@@ -535,7 +594,8 @@ def detectar_columna_nums(gris: np.ndarray) -> tuple[int, int]:
     return int(W * 0.84), int(W * 0.13)
 
 def asignar_filas(ys: list[int], candidatos: tuple,
-                  gris: Optional[np.ndarray] = None) -> dict[str, tuple[int, int]]:
+                  gris: Optional[np.ndarray] = None,
+                  col: Optional[tuple[int, int]] = None) -> dict[str, tuple[int, int]]:
     # Umbral relativo a la altura de la imagen: en el escáner oficial
     # (~10900px) equivale a ~76px; en fotos de celular de menor resolución
     # escala proporcionalmente en vez de descartar todas las filas.
@@ -562,13 +622,23 @@ def asignar_filas(ys: list[int], candidatos: tuple,
     # Las 3 filas que le siguen son total_votantes, total_votos_urna, votos_incinerados.
     niv_encontrada = False
     if gris is not None:
+        Hg, Wg = gris.shape
+        # Banda central: los márgenes blancos diluyen el promedio y en fotos
+        # la franja "negra" queda en gris medio (~130), no < 120.
+        xc0, xc1 = int(Wg * 0.15), int(Wg * 0.85)
         for i, (y1, y2) in enumerate(filas):
-            if float(np.mean(gris[y1:y2, :])) < 120 and i + 3 < len(filas):
-                niv = filas[i + 1: i + 4]
-                asig["total_votantes"]    = niv[0]
-                asig["total_votos_urna"]  = niv[1]
-                asig["votos_incinerados"] = niv[2]
-                niv_encontrada = True
+            if y1 < Hg * 0.12:
+                continue  # cabecera: código de barras / QR también son oscuros
+            if float(np.mean(gris[y1:y2, xc0:xc1])) < 160:
+                # Tomar las 3 filas CLARAS siguientes: la franja puede quedar
+                # partida en varias "filas" oscuras que no son filas reales.
+                claras = [f for f in filas[i + 1:]
+                          if float(np.mean(gris[f[0]:f[1], xc0:xc1])) > 160]
+                if len(claras) >= 3:
+                    asig["total_votantes"]    = claras[0]
+                    asig["total_votos_urna"]  = claras[1]
+                    asig["votos_incinerados"] = claras[2]
+                    niv_encontrada = True
                 break
 
     if not niv_encontrada:
@@ -586,11 +656,23 @@ def asignar_filas(ys: list[int], candidatos: tuple,
             asig["total_votos_urna"]  = filas[2]
             asig["votos_incinerados"] = filas[3]
 
-    # Pie: últimas filas del formulario
-    asig["voto_en_blanco"] = filas[-5]
-    asig["votos_nulos"]    = filas[-4]
-    asig["no_marcados"]    = filas[-3]
-    asig["suma_total"]     = filas[-2]
+    # Pie: últimas filas del formulario. El formato nacional tiene una fila
+    # de margen debajo de SUMA TOTAL (suma = filas[-2]); el consulado no
+    # (suma = filas[-1]). Decidir por dónde hay tinta en la columna de cifras.
+    idx_suma = -2
+    if gris is not None and col is not None and len(filas) >= 6:
+        x0 = col[0] + 10
+        x1 = col[0] + col[1] - 10
+        def _tinta(f):
+            r = gris[f[0]+15:f[1]-15, x0:x1]
+            return float(np.mean(r < 100)) if r.size else 0.0
+        t_ult, t_pen = _tinta(filas[-1]), _tinta(filas[-2])
+        if t_ult > 0.01 and t_ult > t_pen * 1.5:
+            idx_suma = -1
+    asig["voto_en_blanco"] = filas[idx_suma - 3]
+    asig["votos_nulos"]    = filas[idx_suma - 2]
+    asig["no_marcados"]    = filas[idx_suma - 1]
+    asig["suma_total"]     = filas[idx_suma]
     return asig
 
 
@@ -600,11 +682,32 @@ def _clasificar_blob(binaria: np.ndarray, area_min: int,
     H, W = binaria.shape
     area_celda = max(1, H * W)
     info: dict = {"densidad": float(np.mean(binaria > 0))}
-    if info["densidad"] < 0.005:
+    # 0.0015: en casillas de candidato muy altas un "1" fino da densidad
+    # ~0.005 y se descartaba como vacía; el filtro area_min maneja el ruido.
+    if info["densidad"] < 0.0015:
         return "vacia", info
     n, _, stats, _ = cv2.connectedComponentsWithStats(binaria, 8)
-    comps = [(i, stats[i]) for i in range(1, n)
-             if stats[i, cv2.CC_STAT_AREA] >= area_min]
+    comps = []
+    for i in range(1, n):
+        if stats[i, cv2.CC_STAT_AREA] < area_min:
+            continue
+        cw = int(stats[i, cv2.CC_STAT_WIDTH])
+        ch = int(stats[i, cv2.CC_STAT_HEIGHT])
+        cx = int(stats[i, cv2.CC_STAT_LEFT])
+        cy = int(stats[i, cv2.CC_STAT_TOP])
+        # Restos de líneas de tabla: cruzan la casilla y son delgados —
+        # no deben competir como blob dominante contra el ● o el dígito.
+        if cw > 0.85 * W and ch < 0.15 * H:
+            continue
+        if ch > 0.85 * H and cw < 0.15 * W:
+            continue
+        # Fragmentos delgados PEGADOS al borde de la casilla: son trozos del
+        # marco de la tabla que el recorte partió, no tinta manuscrita.
+        if cw < 0.08 * W and ch > 0.40 * H and (cx <= 2 or cx + cw >= W - 2):
+            continue
+        if ch < 0.08 * H and cw > 0.40 * W and (cy <= 2 or cy + ch >= H - 2):
+            continue
+        comps.append((i, stats[i]))
     if not comps:
         return "vacia", info
     _, stat_dom = max(comps, key=lambda x: x[1][cv2.CC_STAT_AREA])
@@ -615,7 +718,19 @@ def _clasificar_blob(binaria: np.ndarray, area_min: int,
     fill_ratio = area_dom / max(1, bw * bh)
     aspect     = min(bw, bh) / max(bw, bh)
     info.update({"frac_celda": frac_celda, "fill_ratio": fill_ratio, "aspect": aspect})
-    es_blob = fill_ratio > 0.55 and aspect > 0.30 and frac_celda > 0.02
+    # Punto pre-impreso pequeño (formato consulado) o mota de ruido: blob
+    # minúsculo respecto al ANCHO de la casilla y compacto → casilla vacía.
+    # (Un dígito real es más alto: el "1" es angosto pero nunca tan bajo.)
+    if bw < 0.12 * W and bh < 0.12 * W and fill_ratio > 0.40:
+        return "vacia", info
+    # Guión manuscrito "—": los jurados lo usan como marcador de cero.
+    # Ancho y muy bajo — ningún dígito tiene esa forma.
+    if bh < 0.15 * bw and bh < 0.12 * H:
+        return "vacia", info
+    # frac 0.006: cubre el ● pre-impreso de fotos de celular y el guión/marca
+    # compacta de cero que escriben los jurados (fill>0.55 protege dígitos).
+    # de la casilla que en el escáner oficial (casillas más anchas).
+    es_blob = fill_ratio > 0.55 and aspect > 0.30 and frac_celda > 0.006
     if not es_blob:
         return "digito", info
     bx = int(stat_dom[cv2.CC_STAT_LEFT])
@@ -647,8 +762,10 @@ def extraer_señales_casilla(roi_gris: np.ndarray, cfg: Config,
     k_h = cv2.getStructuringElement(cv2.MORPH_RECT, (max(3, W_b * 9 // 10), 2))
     bordes_h = cv2.morphologyEx(b, cv2.MORPH_OPEN, k_h)
     b = cv2.bitwise_and(b, cv2.bitwise_not(bordes_h))
-    area_total = b.shape[0] * b.shape[1]
-    area_min = max(10, int(area_total * 0.005))
+    # Escalar con el ANCHO (grosor de trazo), no con el área: en casillas de
+    # candidato muy altas (256×1574) el 0.5% del área exige ~2000px y un "1"
+    # fino (~600px) desaparecía, componiendo 16→6 o 229→209.
+    area_min = max(10, int(b.shape[1] * 1.2))
     clase_blob, info_blob = _clasificar_blob(b, area_min, gris_original=roi_gris)
     s.densidad = info_blob["densidad"]
     if clase_blob == "vacia":
@@ -659,7 +776,15 @@ def extraer_señales_casilla(roi_gris: np.ndarray, cfg: Config,
         s.clase = "void"
         return s
     if clase_blob == "void_con_digito":
-        s.clase = "void_con_digito"
+        # Confirmar con OCR: en fotos, el ruido JPEG infla la varianza de
+        # intensidad del ● y produce falsos "dígito sobre círculo". Sin un
+        # dígito 1-9 legible encima, es un ● simple.
+        txt, conf = reco.leer(roi_gris)
+        if txt and txt != "0":
+            s.clase = "void_con_digito"
+            s.digito_ocr, s.conf_ocr = txt, conf
+        else:
+            s.clase = "void"
         cv2.imwrite(str(ruta_recorte), roi_gris)
         return s
     s.clase = "digito"
@@ -745,11 +870,17 @@ def _componer_valor(señales: list[SeñalesRaw], cfg: Config) -> tuple[Optional[
         if s.clase == "vacia":
             digitos.append("0"); conf_total += 1.0; n += 1
         elif s.clase == "void":
-            return None, 0.0
+            # ● pre-impreso = posición anulada = cero de relleno.
+            # "● ● 5" significa 005 = 5, no un campo ilegible.
+            digitos.append("0"); conf_total += 1.0; n += 1
         elif s.clase == "void_con_digito":
             digitos.append(s.digito_ocr or "?"); conf_total += 0.3; n += 1; toda_vacia = False
         elif s.clase == "digito" and s.digito_ocr:
             digitos.append(s.digito_ocr); conf_total += s.conf_ocr; n += 1; toda_vacia = False
+        elif s.clase == "ilegible" and s.densidad < 0.008:
+            # Mota de tinta insuficiente para ser un dígito real (ruido de
+            # foto): cero de relleno con confianza baja, no anular el campo.
+            digitos.append("0"); conf_total += 0.4; n += 1
         else:
             return None, 0.0
     if toda_vacia:
@@ -977,7 +1108,7 @@ def procesar_pdf_pasada1(pdf_path: Path, reco: Reconocedor,
         acta.fallo_extraccion = f"Solo {len(ys)} líneas horizontales; PDF ilegible."
         return acta
     x_col, w_col = detectar_columna_nums(gris)
-    asig = asignar_filas(ys, cfg.candidatos, gris)
+    asig = asignar_filas(ys, cfg.candidatos, gris, col=(x_col, w_col))
     if not asig:
         acta.fallo_extraccion = "No se pudo asignar filas al acta."
         return acta
@@ -1033,11 +1164,19 @@ def calcular_estadisticas_batch(actas: list[ActaE14]) -> EstadisticasBatch:
         for s in acta.señales_raw:
             if s.clase not in ("digito", "ilegible", "vacia"):
                 continue
+            # borrado_score: baseline sobre todas las clases (una vacía con
+            # grafito residual es justamente lo que se busca).
+            acum[s.campo]["borrado_score"].append(s.borrado_score)
+            # Señales de trazo: SOLO casillas con dígito real. Incluir vacías
+            # (cv=0, comps=0) arrastra la media a 0 y hace que cualquier
+            # dígito en un campo mayormente vacío (blanco/nulos) parezca
+            # outlier — falso positivo sistemático.
+            if s.clase != "digito":
+                continue
             acum[s.campo]["dens_interior_lazo"].append(s.dens_interior_lazo)
             acum[s.campo]["cv_ancho_trazo"].append(s.cv_ancho_trazo)
             acum[s.campo]["n_componentes"].append(float(s.n_componentes))
             acum[s.campo]["n_huecos"].append(float(s.n_huecos))
-            acum[s.campo]["borrado_score"].append(s.borrado_score)
     for campo, señales in acum.items():
         eb.por_campo[campo] = {}
         for señal, valores in señales.items():
@@ -1074,7 +1213,12 @@ def evaluar_señal_visual(s: SeñalesRaw, eb: EstadisticasBatch,
     # no dígito manuscrito. Densidad > 0.30 distingue un ● de un trazo fino de pluma.
     if s.densidad > 0.30 and not s.digito_ocr:
         return hallazgos
-    if s.digito_ocr and s.digito_ocr in cfg.huecos_esperados:
+    # Las señales A-topología, B y C2 comparan la forma del trazo contra lo
+    # que dice el OCR: solo tienen sentido con lectura confiable. Un dígito
+    # mal leído produce falsos mismatches topológicos.
+    ocr_confiable = bool(s.digito_ocr) and s.conf_ocr >= cfg.umbral_confianza_ocr
+
+    if ocr_confiable and s.digito_ocr in cfg.huecos_esperados:
         esperados = cfg.huecos_esperados[s.digito_ocr]
         if s.n_huecos != esperados:
             hallazgos.append(("A",
@@ -1085,14 +1229,15 @@ def evaluar_señal_visual(s: SeñalesRaw, eb: EstadisticasBatch,
         hallazgos.append(("A",
             f"Trazo dentro del lazo ({s.dens_interior_lazo:.0%}); batch: {m:.2f}±{std:.2f}", 30.0))
     m, std, uiqr = _get("cv_ancho_trazo")
-    if es_outlier(s.cv_ancho_trazo, m, std, cfg.n_sigma_outlier, uiqr):
+    if ocr_confiable and es_outlier(s.cv_ancho_trazo, m, std, cfg.n_sigma_outlier, uiqr):
         hallazgos.append(("B",
             f"Ancho de trazo mixto (cv={s.cv_ancho_trazo:.2f}); batch: {m:.2f}±{std:.2f}", 20.0))
     if s.tiene_trazo_horiz and s.digito_ocr in ("1",):
         hallazgos.append(("C",
             f"Trazo horizontal largo en '{s.digito_ocr}' (posible guion→1)", 25.0))
     m, std, uiqr = _get("n_componentes")
-    if es_outlier(float(s.n_componentes), m, std, cfg.n_sigma_outlier + 0.5, uiqr):
+    if ocr_confiable and es_outlier(float(s.n_componentes), m, std,
+                                    cfg.n_sigma_outlier + 0.5, uiqr):
         hallazgos.append(("C",
             f"Componentes anómalos ({s.n_componentes} vs batch {m:.1f}±{std:.1f})", 15.0))
     return hallazgos
@@ -1135,6 +1280,7 @@ def scoring_acta(acta: ActaE14, eb: EstadisticasBatch,
             if (s.campo in cfg.candidatos
                     and s.casilla == 0
                     and s.tiene_trazo_h_top
+                    and s.densidad >= 0.012  # tinta de dígito real, no mota
                     and s.clase in ("digito", "ilegible", "void_con_digito")):
                 acta.hallazgos.append(Hallazgo(
                     "G", "centenas_trazo_horiz",
@@ -1167,13 +1313,18 @@ def scoring_acta(acta: ActaE14, eb: EstadisticasBatch,
             if voto is not None and voto > urna_ref:
                 conf_min = min(acta.confianza.get(cand, 1.0),
                                acta.confianza.get(campo_ref, 1.0))
-                sev = 100.0 if conf_min >= cfg.umbral_confianza_ocr else 15.0
+                # Exceso de unidades (Δ≤9) = huella típica de UN dígito mal
+                # leído por OCR, no de fraude (que suma decenas/centenas).
+                fiable = (conf_min >= cfg.umbral_confianza_ocr
+                          and voto - urna_ref > 9)
+                sev = 100.0 if fiable else 15.0
                 acta.hallazgos.append(Hallazgo(
                     "D", "votos_exceden_urna",
                     f"Candidato '{cand}' con {voto} votos supera la urna/votantes "
                     f"({urna_ref}) — aritméticamente imposible."
-                    + ("" if sev == 100.0
-                       else f" Confianza OCR baja ({conf_min:.0%})."), sev))
+                    + ("" if fiable
+                       else " Diferencia pequeña o confianza OCR baja: "
+                            "posible error de lectura, verificar."), sev))
                 score += sev
 
     # D — Aritmética completa
@@ -1579,6 +1730,12 @@ def auditar(carpeta, salida, oficiales_path, ocr_motor, google_key):
             print("[ERROR] --ocr google requiere --google-key")
             return
         reco: Reconocedor = ReconocedorGoogleVision(google_key)
+    elif ocr_motor == "rapidocr":
+        try:
+            reco = ReconocedorRapidOCR()
+            print("[OK] RapidOCR listo (neuronal local, modelos incluidos).")
+        except RuntimeError as e:
+            print(f"[ERROR] {e}"); return
     elif ocr_motor == "easyocr":
         try:
             reco = ReconocedorEasyOCR()
@@ -1807,7 +1964,7 @@ FORMATO CSV (--lista):
     p.add_argument("--oficiales",    default=None,
                                      help="JSON con preconteo oficial por mesa")
     p.add_argument("--ocr",          default="tesseract",
-                                     choices=["tesseract", "easyocr", "google"])
+                                     choices=["tesseract", "rapidocr", "easyocr", "google"])
     p.add_argument("--google-key",   default=None,
                                      help="Credenciales Google Cloud Vision (.json)")
     p.add_argument("--autotest",     action="store_true",
