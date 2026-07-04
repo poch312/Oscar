@@ -1476,10 +1476,7 @@ def analisis_benford_batch(actas: list[ActaE14], cfg: Config) -> list[dict]:
             msg = (f"Benford '{cand}': chi2={chi2:.1f} > {cfg.chi2_benford_critico} "
                    f"(n={n}) — distribución de primeros dígitos estadísticamente anómala.")
             for acta in actas:
-                acta.hallazgos.append(Hallazgo("Z", cand, msg, 20.0))
-                acta.score = min(100.0, acta.score + 20.0)
-                if acta.tier == Tier.LIMPIA:
-                    acta.tier = Tier.REVISAR
+                acta.hallazgos.append(Hallazgo("Z", cand, msg, 0.0))
     return resultados
 
 
@@ -1760,12 +1757,27 @@ def auditar(carpeta, salida, oficiales_path, ocr_motor, google_key):
         print("[AVISO] No hay PDFs. Verifica la ruta.")
         return
 
+    # ── DEDUP POR SHA256 ─────────────────────────────────────────────────
+    hashes_vistos: dict[str, Path] = {}
+    pdfs_unicos: list[Path] = []
+    n_dup = 0
+    for p in pdfs:
+        h = sha256(p)
+        if h in hashes_vistos:
+            n_dup += 1
+        else:
+            hashes_vistos[h] = p
+            pdfs_unicos.append(p)
+    if n_dup:
+        print(f"[OK] {n_dup} PDFs duplicados (mismo SHA256) omitidos → "
+              f"{len(pdfs_unicos)} únicos a procesar.")
+
     print("\n── PASADA 1: extrayendo señales...")
     actas: list[ActaE14] = []
     interrumpido = False
     try:
-        for i, pdf in enumerate(pdfs, 1):
-            print(f"  [{i:4d}/{len(pdfs)}] {pdf.name[:60]}")
+        for i, pdf in enumerate(pdfs_unicos, 1):
+            print(f"  [{i:4d}/{len(pdfs_unicos)}] {pdf.name[:60]}")
             try:
                 acta = procesar_pdf_pasada1(pdf, reco, cfg, dir_evi)
             except Exception as e:
@@ -1786,8 +1798,43 @@ def auditar(carpeta, salida, oficiales_path, ocr_motor, google_key):
             continue
         scoring_acta(acta, eb, cfg, oficiales)
 
+    # ── Normalizar H/pdf_metadata uniforme ─────────────────────────────
+    n_h_meta = sum(1 for a in actas if any(
+        h.familia == "H" and h.campo == "pdf_metadata" for h in a.hallazgos))
+    if len(actas) >= 3 and n_h_meta / len(actas) > 0.70:
+        print(f"[INFO] {n_h_meta}/{len(actas)} PDFs comparten misma anomalía de "
+              f"metadatos — característica del escáner, no anomalía individual.")
+        for acta in actas:
+            nuevos = []
+            for h in acta.hallazgos:
+                if h.familia == "H" and h.campo == "pdf_metadata" and h.score_aporte <= 15.0:
+                    acta.score = max(0.0, acta.score - h.score_aporte)
+                    nuevos.append(Hallazgo(h.familia, h.campo,
+                        h.mensaje + " [Nota: uniforme en el lote — escáner, no anomalía]",
+                        0.0, h.evidencia_img))
+                else:
+                    nuevos.append(h)
+            acta.hallazgos = nuevos
+            if acta.score < cfg.score_umbral_revisar and acta.tier == Tier.MANUAL:
+                if not any(s.clase == "ilegible" for s in acta.señales_raw):
+                    acta.tier = Tier.LIMPIA
+
     print("\n── PASADA 3: análisis de lote (Benford + cross-mesa)...")
     resumen_lote = pasada3_analisis_lote(actas, cfg, out)
+
+    # Re-evaluar tiers: actas que solo tenían Z+H (ahora score~0) → LIMPIA
+    for acta in actas:
+        if acta.fallo_extraccion:
+            continue
+        score_real = sum(h.score_aporte for h in acta.hallazgos)
+        acta.score = min(100.0, score_real)
+        tiene_hallazgo_real = any(
+            h.score_aporte > 0 for h in acta.hallazgos)
+        if not tiene_hallazgo_real:
+            if any(s.clase == "ilegible" for s in acta.señales_raw):
+                acta.tier = Tier.MANUAL
+            else:
+                acta.tier = Tier.LIMPIA
 
     csv_path, html_path, n_filas = generar_reporte(actas, out, cfg, resumen_lote)
     imprimir_resumen(actas, csv_path, html_path, n_filas, resumen_lote)
