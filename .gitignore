@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# datasets / model artifacts — too large for git, fetched/trained locally
+data/
+models/*.pt
+models/*.pth
+models/calibration.json
+!models/.gitkeep
+
+# input actas / reports — may contain sensitive/official election data
+input/
+output/
+*.pdf
+!docs/**/*.pdf
