@@ -617,10 +617,11 @@ def _clasificar_blob(binaria: np.ndarray, area_min: int,
     if bh < 0.15 * bw and bh < 0.12 * H:
         return "vacia", info
 
-    # frac 0.006: cubre el ● pre-impreso de fotos de celular y el guión/marca
-    # compacta de cero que escriben los jurados (fill>0.55 protege dígitos).
-    # de la casilla que en el escáner oficial (casillas más anchas).
-    es_blob = fill_ratio > 0.55 and aspect > 0.30 and frac_celda > 0.006
+    # frac 0.003: en casillas de candidato muy altas (~250×1550) el ●
+    # pre-impreso da frac_celda ~0.004-0.006; con 0.006 se escapaba como
+    # "digito" y el OCR lo leía como 6/9/7 inflando votos artificialmente.
+    # fill_ratio>0.55 sigue protegiendo dígitos reales (max ~0.35 en esas celdas).
+    es_blob = fill_ratio > 0.55 and aspect > 0.30 and frac_celda > 0.003
     if not es_blob:
         return "digito", info
 
