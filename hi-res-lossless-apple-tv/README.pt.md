@@ -6,9 +6,13 @@ Documentação de testes práticos que confirmam que a Apple TV (com tvOS 27) en
 
 ## Configuração comum
 
-- **Fonte**: Apple TV 4K, tvOS 27, app Apple Music
+- **Fonte**: Apple TV 4K (3ª geração, 2022), modelo A2843 (128 GB), tvOS 27.0 (24J361), app Apple Music
 - **Conexão**: HDMI (Apple TV) → Extrator de áudio HDMI → Saída óptica/coaxial → Entrada do DAC em teste
 - **Extrator HDMI**: extrator genérico "HDMI/MHL para IIS I2S" com saídas I2S/DSD, óptica e coaxial, com gabinete ([AliExpress](https://a.aliexpress.com/_m0gQ4Sf))
+
+![Apple TV: modelo A2843, tvOS 27.0](images/apple-tv-info-tvos27.jpeg)
+
+Tela Ajustes → Geral → Sobre da Apple TV usada: modelo **A2843 (128 GB)** e **tvOS 27.0 (24J361)**. O número de série e os dados de rede foram ocultados.
 
 ---
 
