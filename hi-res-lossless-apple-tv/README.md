@@ -1,6 +1,6 @@
 # Verificación de Hi-Res Lossless: Apple TV + Extractor de Audio HDMI + Varios DACs
 
-> 🌐 **Español** · [English](README.en.md) · [中文](README.zh.md) · [हिन्दी](README.hi.md) · [日本語](README.ja.md)
+> 🌐 **Español** · [English](README.en.md) · [中文](README.zh.md) · [हिन्दी](README.hi.md) · [日本語](README.ja.md) · [Português](README.pt.md)
 
 Documentación de pruebas prácticas que confirman que Apple TV (con tvOS 27) entrega audio genuinamente por encima de 48kHz para contenido marcado como "Hi-Res Lossless" en Apple Music, verificado con distintos DACs conectados a la misma cadena de extracción de audio HDMI.
 

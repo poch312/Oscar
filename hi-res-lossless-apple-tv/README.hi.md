@@ -1,6 +1,6 @@
 # Hi-Res Lossless सत्यापन: Apple TV + HDMI ऑडियो एक्सट्रैक्टर + कई DAC
 
-> 🌐 [Español](README.md) · [English](README.en.md) · [中文](README.zh.md) · **हिन्दी** · [日本語](README.ja.md)
+> 🌐 [Español](README.md) · [English](README.en.md) · [中文](README.zh.md) · **हिन्दी** · [日本語](README.ja.md) · [Português](README.pt.md)
 
 यह दस्तावेज़ उन व्यावहारिक परीक्षणों का विवरण है जो पुष्टि करते हैं कि Apple TV (tvOS 27 के साथ) Apple Music में "Hi-Res Lossless" चिह्नित सामग्री के लिए वास्तव में 48kHz से अधिक सैंपल रेट पर ऑडियो भेजता है। इसकी पुष्टि एक ही HDMI ऑडियो एक्सट्रैक्शन चेन से जुड़े अलग-अलग DAC के साथ की गई।
 
