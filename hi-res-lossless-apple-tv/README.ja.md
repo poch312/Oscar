@@ -1,6 +1,6 @@
 # Hi-Res Lossless の検証：Apple TV + HDMI オーディオ分離器 + 複数の DAC
 
-> 🌐 [Español](README.md) · [English](README.en.md) · [中文](README.zh.md) · [हिन्दी](README.hi.md) · **日本語**
+> 🌐 [Español](README.md) · [English](README.en.md) · [中文](README.zh.md) · [हिन्दी](README.hi.md) · **日本語** · [Português](README.pt.md)
 
 Apple TV（tvOS 27）が、Apple Music で「ハイレゾロスレス（Hi-Res Lossless）」と表示されたコンテンツについて、実際に 48kHz を超える音声を出力していることを確認した実地テストの記録です。同じ HDMI オーディオ分離チェーンに接続した異なる DAC で検証しました。
 
