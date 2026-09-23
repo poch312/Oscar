@@ -8,6 +8,7 @@ Documentación de pruebas prácticas que confirman que Apple TV (con tvOS 27) en
 
 - **Fuente**: Apple TV 4K, tvOS 27, app Apple Music
 - **Conexión**: HDMI (Apple TV) → Extractor de audio HDMI → Salida óptica/coaxial → Entrada del DAC bajo prueba
+- **Extractor HDMI**: extractor genérico "HDMI/MHL a IIS I2S" con salidas I2S/DSD, óptica y coaxial, con estuche ([AliExpress](https://a.aliexpress.com/_m0gQ4Sf))
 
 ---
 

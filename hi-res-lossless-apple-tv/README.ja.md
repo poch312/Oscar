@@ -8,6 +8,7 @@ Apple TV（tvOS 27）が、Apple Music で「ハイレゾロスレス（Hi-Res L
 
 - **ソース**：Apple TV 4K、tvOS 27、Apple Music アプリ
 - **接続**：HDMI（Apple TV）→ HDMI オーディオ分離器 → 光／同軸出力 → テスト対象 DAC の入力
+- **HDMI 分離器**：汎用の「HDMI/MHL to IIS I2S」オーディオ分離器（I2S/DSD、光、同軸出力、ケース付き）（[AliExpress](https://a.aliexpress.com/_m0gQ4Sf)）
 
 ---
 
