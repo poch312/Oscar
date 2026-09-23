@@ -8,7 +8,7 @@ Apple TV（tvOS 27）が、Apple Music で「ハイレゾロスレス（Hi-Res L
 
 - **ソース**：Apple TV 4K（第 3 世代、2022 年モデル）、モデル A2843（128 GB）、tvOS 27.0（24J361）、Apple Music アプリ
 - **接続**：HDMI（Apple TV）→ HDMI オーディオ分離器 → 光／同軸出力 → テスト対象 DAC の入力
-- **HDMI 分離器**：汎用の「HDMI/MHL to IIS I2S」オーディオ分離器（I2S/DSD、光、同軸出力、ケース付き）（[AliExpress](https://a.aliexpress.com/_m0gQ4Sf)）
+- **HDMI 分離器**：汎用の「HDMI/MHL to IIS I2S」オーディオ分離器（I2S/DSD、光、同軸出力、ケース付き）（[AliExpress](https://www.aliexpress.com/item/1005009869837996.html)）
 
 ![Apple TV：モデル A2843、tvOS 27.0](images/apple-tv-info-tvos27.jpeg)
 

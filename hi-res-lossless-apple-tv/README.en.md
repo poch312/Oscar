@@ -8,7 +8,7 @@ Documentation of hands-on tests confirming that Apple TV (running tvOS 27) deliv
 
 - **Source**: Apple TV 4K (3rd generation, 2022), model A2843 (128 GB), tvOS 27.0 (24J361), Apple Music app
 - **Connection**: HDMI (Apple TV) → HDMI audio extractor → Optical/coaxial output → Input of the DAC under test
-- **HDMI extractor**: generic "HDMI/MHL to IIS I2S" audio extractor with I2S/DSD, optical and coaxial outputs, in an enclosure ([AliExpress](https://a.aliexpress.com/_m0gQ4Sf))
+- **HDMI extractor**: generic "HDMI/MHL to IIS I2S" audio extractor with I2S/DSD, optical and coaxial outputs, in an enclosure ([AliExpress](https://www.aliexpress.com/item/1005009869837996.html))
 
 ![Apple TV: model A2843, tvOS 27.0](images/apple-tv-info-tvos27.jpeg)
 
