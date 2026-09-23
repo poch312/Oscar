@@ -8,7 +8,7 @@
 
 - **音源**：Apple TV 4K（第三代，2022 年款），型号 A2843（128 GB），tvOS 27.0（24J361），Apple Music 应用
 - **连接方式**：HDMI（Apple TV）→ HDMI 音频分离器 → 光纤/同轴输出 → 被测 DAC 的输入端
-- **HDMI 分离器**：通用型“HDMI/MHL 转 IIS I2S”音频分离器，带 I2S/DSD、光纤和同轴输出，含外壳（[AliExpress](https://a.aliexpress.com/_m0gQ4Sf)）
+- **HDMI 分离器**：通用型“HDMI/MHL 转 IIS I2S”音频分离器，带 I2S/DSD、光纤和同轴输出，含外壳（[AliExpress](https://www.aliexpress.com/item/1005009869837996.html)）
 
 ![Apple TV：型号 A2843，tvOS 27.0](images/apple-tv-info-tvos27.jpeg)
 
