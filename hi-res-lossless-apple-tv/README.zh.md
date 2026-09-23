@@ -58,7 +58,11 @@ K7 的 LED 变为 **青色/蓝色** —— 确认采样率 ≤ 48kHz，与该曲
 
 分离器输出面板（光纤、同轴、IIS/I2S）的近景，它连接在 Apple TV 与 DAC 之间，状态 LED 为绿色，表示信号正常。
 
-**视频**：[k7-led-cambio-color-video.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/k7-led-cambio-color-video.mov) —— LED 实时变色过程。
+**视频**：LED 实时变色过程。
+
+https://github.com/user-attachments/assets/fa6dc061-688a-4db3-85d3-997c63ec1e9c
+
+[原始画质（.mov）](https://github.com/poch312/Oscar/releases/download/videos-hires/k7-led-cambio-color-video.mov)
 
 ---
 
@@ -85,7 +89,25 @@ K7 的 LED 变为 **青色/蓝色** —— 确认采样率 ≤ 48kHz，与该曲
 
 Apple TV 正在播放 Coldplay 的《Green Eyes》（专辑 *A Rush of Blood to the Head*），可以看到“Hi-Res Lossless”标识，右下角回音壁上方可以看到 HDMI 音频分离器。
 
-**视频**：[zd3-video-1.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-1.mov)、[zd3-video-2.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-2.mov)、[zd3-video-3.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-3.mov)
+**视频**：
+
+*视频 1*
+
+https://github.com/user-attachments/assets/82a875ff-21fc-429f-bb8d-3ef2c630162e
+
+[原始画质（.mov）](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-1.mov)
+
+*视频 2*
+
+https://github.com/user-attachments/assets/a61e8090-e8d0-4bf9-a687-05de88ff00e6
+
+[原始画质（.mov）](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-2.mov)
+
+*视频 3*
+
+https://github.com/user-attachments/assets/0e932fb8-033e-4ee8-ab29-6125ce7eeeb3
+
+[原始画质（.mov）](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-3.mov)
 
 ---
 
