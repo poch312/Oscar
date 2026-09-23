@@ -8,6 +8,7 @@ Documentation of hands-on tests confirming that Apple TV (running tvOS 27) deliv
 
 - **Source**: Apple TV 4K, tvOS 27, Apple Music app
 - **Connection**: HDMI (Apple TV) → HDMI audio extractor → Optical/coaxial output → Input of the DAC under test
+- **HDMI extractor**: generic "HDMI/MHL to IIS I2S" audio extractor with I2S/DSD, optical and coaxial outputs, in an enclosure ([AliExpress](https://a.aliexpress.com/_m0gQ4Sf))
 
 ---
 

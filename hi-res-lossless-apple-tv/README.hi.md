@@ -8,6 +8,7 @@
 
 - **स्रोत**: Apple TV 4K, tvOS 27, Apple Music ऐप
 - **कनेक्शन**: HDMI (Apple TV) → HDMI ऑडियो एक्सट्रैक्टर → ऑप्टिकल/कोएक्सियल आउटपुट → परीक्षण किए जा रहे DAC का इनपुट
+- **HDMI एक्सट्रैक्टर**: सामान्य "HDMI/MHL से IIS I2S" ऑडियो एक्सट्रैक्टर, I2S/DSD, ऑप्टिकल और कोएक्सियल आउटपुट के साथ, केस सहित ([AliExpress](https://a.aliexpress.com/_m0gQ4Sf))
 
 ---
 
