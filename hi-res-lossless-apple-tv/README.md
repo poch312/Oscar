@@ -56,7 +56,7 @@ El LED del K7 cambia a **cian/azul** — confirma sample rate ≤ 48kHz, consist
 
 Vista cercana del panel de salidas del extractor (óptica, coaxial, IIS/I2S) conectado entre el Apple TV y el DAC, con el LED de estado en verde indicando señal activa.
 
-**Video**: [k7-led-cambio-color-video.mov](images/k7-led-cambio-color-video.mov) — cambio de color del LED en tiempo real.
+**Video**: [k7-led-cambio-color-video.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/k7-led-cambio-color-video.mov) — cambio de color del LED en tiempo real.
 
 ---
 
@@ -83,7 +83,7 @@ Pantalla del ZD3 mostrando **192k / OPT / PCM** con el volumen en 50, mientras r
 
 Apple TV reproduciendo "Fix You" de Coldplay (álbum *X&Y*), con el badge "Hi-Res Lossless" visible, y el extractor de audio HDMI visible en la esquina inferior derecha sobre la barra de sonido.
 
-**Videos**: [zd3-video-1.mov](images/zd3-video-1.mov), [zd3-video-2.mov](images/zd3-video-2.mov), [zd3-video-3.mov](images/zd3-video-3.mov)
+**Videos**: [zd3-video-1.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-1.mov), [zd3-video-2.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-2.mov), [zd3-video-3.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-3.mov)
 
 ---
 
