@@ -58,7 +58,11 @@ K7 की LED **सियान/नीली** हो जाती है — �
 
 Apple TV और DAC के बीच जुड़े एक्सट्रैक्टर के आउटपुट पैनल (ऑप्टिकल, कोएक्सियल, IIS/I2S) का नज़दीकी दृश्य; हरी स्टेटस LED सक्रिय सिग्नल दर्शाती है।
 
-**वीडियो**: [k7-led-cambio-color-video.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/k7-led-cambio-color-video.mov) — LED का रीयल टाइम में रंग बदलना।
+**वीडियो**: LED का रीयल टाइम में रंग बदलना।
+
+https://github.com/user-attachments/assets/fa6dc061-688a-4db3-85d3-997c63ec1e9c
+
+[मूल गुणवत्ता (.mov)](https://github.com/poch312/Oscar/releases/download/videos-hires/k7-led-cambio-color-video.mov)
 
 ---
 
@@ -85,7 +89,25 @@ Hi-Res Lossless ट्रैक चलते समय ZD3 स्क्रीन
 
 Apple TV पर Coldplay का "Green Eyes" (एल्बम *A Rush of Blood to the Head*) चल रहा है, "Hi-Res Lossless" बैज दिखाई दे रहा है, और निचले दाएँ कोने में साउंडबार के ऊपर HDMI ऑडियो एक्सट्रैक्टर दिखाई दे रहा है।
 
-**वीडियो**: [zd3-video-1.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-1.mov), [zd3-video-2.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-2.mov), [zd3-video-3.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-3.mov)
+**वीडियो**:
+
+*वीडियो 1*
+
+https://github.com/user-attachments/assets/82a875ff-21fc-429f-bb8d-3ef2c630162e
+
+[मूल गुणवत्ता (.mov)](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-1.mov)
+
+*वीडियो 2*
+
+https://github.com/user-attachments/assets/a61e8090-e8d0-4bf9-a687-05de88ff00e6
+
+[मूल गुणवत्ता (.mov)](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-2.mov)
+
+*वीडियो 3*
+
+https://github.com/user-attachments/assets/0e932fb8-033e-4ee8-ab29-6125ce7eeeb3
+
+[मूल गुणवत्ता (.mov)](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-3.mov)
 
 ---
 

@@ -58,7 +58,11 @@ K7 の LED が **シアン／青** に変化 — サンプルレートが 48kHz 
 
 Apple TV と DAC の間に接続された分離器の出力パネル（光、同軸、IIS/I2S）のクローズアップ。ステータス LED が緑色に点灯し、信号が有効であることを示しています。
 
-**動画**：[k7-led-cambio-color-video.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/k7-led-cambio-color-video.mov) — LED がリアルタイムで色を変える様子。
+**動画**：LED がリアルタイムで色を変える様子。
+
+https://github.com/user-attachments/assets/fa6dc061-688a-4db3-85d3-997c63ec1e9c
+
+[オリジナル画質（.mov）](https://github.com/poch312/Oscar/releases/download/videos-hires/k7-led-cambio-color-video.mov)
 
 ---
 
@@ -85,7 +89,25 @@ Hi-Res Lossless の曲を再生中、ZD3 の画面に **192k / OPT / PCM**、ボ
 
 Apple TV で Coldplay の「Green Eyes」（アルバム *A Rush of Blood to the Head*）を再生中。「Hi-Res Lossless」バッジが表示され、右下のサウンドバーの上に HDMI オーディオ分離器が見えます。
 
-**動画**：[zd3-video-1.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-1.mov)、[zd3-video-2.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-2.mov)、[zd3-video-3.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-3.mov)
+**動画**：
+
+*動画 1*
+
+https://github.com/user-attachments/assets/82a875ff-21fc-429f-bb8d-3ef2c630162e
+
+[オリジナル画質（.mov）](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-1.mov)
+
+*動画 2*
+
+https://github.com/user-attachments/assets/a61e8090-e8d0-4bf9-a687-05de88ff00e6
+
+[オリジナル画質（.mov）](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-2.mov)
+
+*動画 3*
+
+https://github.com/user-attachments/assets/0e932fb8-033e-4ee8-ab29-6125ce7eeeb3
+
+[オリジナル画質（.mov）](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-3.mov)
 
 ---
 

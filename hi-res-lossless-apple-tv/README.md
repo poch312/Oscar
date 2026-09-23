@@ -58,7 +58,11 @@ El LED del K7 cambia a **cian/azul** — confirma sample rate ≤ 48kHz, consist
 
 Vista cercana del panel de salidas del extractor (óptica, coaxial, IIS/I2S) conectado entre el Apple TV y el DAC, con el LED de estado en verde indicando señal activa.
 
-**Video**: [k7-led-cambio-color-video.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/k7-led-cambio-color-video.mov) — cambio de color del LED en tiempo real.
+**Video**: cambio de color del LED en tiempo real.
+
+https://github.com/user-attachments/assets/fa6dc061-688a-4db3-85d3-997c63ec1e9c
+
+[Calidad original (.mov)](https://github.com/poch312/Oscar/releases/download/videos-hires/k7-led-cambio-color-video.mov)
 
 ---
 
@@ -85,7 +89,25 @@ Pantalla del ZD3 mostrando **192k / OPT / PCM** con el volumen en 50, mientras r
 
 Apple TV reproduciendo "Green Eyes" de Coldplay (álbum *A Rush of Blood to the Head*), con el badge "Hi-Res Lossless" visible, y el extractor de audio HDMI visible en la esquina inferior derecha sobre la barra de sonido.
 
-**Videos**: [zd3-video-1.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-1.mov), [zd3-video-2.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-2.mov), [zd3-video-3.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-3.mov)
+**Videos**:
+
+*Video 1*
+
+https://github.com/user-attachments/assets/82a875ff-21fc-429f-bb8d-3ef2c630162e
+
+[Calidad original (.mov)](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-1.mov)
+
+*Video 2*
+
+https://github.com/user-attachments/assets/a61e8090-e8d0-4bf9-a687-05de88ff00e6
+
+[Calidad original (.mov)](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-2.mov)
+
+*Video 3*
+
+https://github.com/user-attachments/assets/0e932fb8-033e-4ee8-ab29-6125ce7eeeb3
+
+[Calidad original (.mov)](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-3.mov)
 
 ---
 
