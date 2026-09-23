@@ -66,7 +66,7 @@ Vista cercana del panel de salidas del extractor (óptica, coaxial, IIS/I2S) con
 
 ### Resultado observado
 
-Reproduciendo **"Fix You"** (Coldplay — *X&Y*), marcada como **Hi-Res Lossless** en Apple Music, entrando por **óptico (OPT)**:
+Reproduciendo **"Green Eyes"** (Coldplay — *A Rush of Blood to the Head*), marcada como **Hi-Res Lossless** en Apple Music, entrando por **óptico (OPT)**:
 
 - La pantalla del ZD3 muestra: **192k** (sample rate), **PCM** (formato), volumen en **50**
 - Esto confirma de forma numérica exacta — no aproximada por color — que la señal llega a 24-bit/192kHz, muy por encima del techo de 48kHz que existía antes de tvOS 27
@@ -79,9 +79,9 @@ Esto es una confirmación **más precisa** que la del K7: mientras el K7 solo in
 
 Pantalla del ZD3 mostrando **192k / OPT / PCM** con el volumen en 50, mientras reproduce la pista Hi-Res Lossless.
 
-![Apple TV mostrando Fix You en Hi-Res Lossless](images/apple-tv-fixyou-hires-lossless.jpeg)
+![Apple TV mostrando Green Eyes en Hi-Res Lossless](images/apple-tv-greeneyes-hires-lossless-extractor.jpeg)
 
-Apple TV reproduciendo "Fix You" de Coldplay (álbum *X&Y*), con el badge "Hi-Res Lossless" visible, y el extractor de audio HDMI visible en la esquina inferior derecha sobre la barra de sonido.
+Apple TV reproduciendo "Green Eyes" de Coldplay (álbum *A Rush of Blood to the Head*), con el badge "Hi-Res Lossless" visible, y el extractor de audio HDMI visible en la esquina inferior derecha sobre la barra de sonido.
 
 **Videos**: [zd3-video-1.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-1.mov), [zd3-video-2.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-2.mov), [zd3-video-3.mov](https://github.com/poch312/Oscar/releases/download/videos-hires/zd3-video-3.mov)
 
